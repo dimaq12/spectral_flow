@@ -1,127 +1,359 @@
-# spectral_flow
+# Spectral Flow Transform
 
-**One formula. One kernel. All operators.**
+<p align="center">
+  <b>One formula. One kernel. All operators.</b><br>
+  <sub>From Fourier to non-commutative spectral geometry. From data to operator in one call.</sub>
+</p>
 
-```
-W(i,j) = v_iᵀ · B_j · v_i  =  ∂λ_i/∂k_j
-```
-
-A(k) = A₀ + Σ kⱼ·Bⱼ — a linear operator family.  
-W is the spectral flow kernel: one diagonalization → all eigenvalue derivatives w.r.t. all parameters.
-
----
-
-## Why
-
-| Before | After |
-|--------|-------|
-| Every perturbation k → new `eigh` O(N³) | One `eigh` at build, then `W·dk` at O(N·M) |
-| Spectral flow as abstract theory | W as the operator's Jacobian — prediction, inverse design, topology |
-| Each domain — custom code | 12 adapters: audio, image, graph, text, video, voxel, point cloud, molecule, finance, tabular, mesh |
+<p align="center">
+  <code>W(i,j) = v<sub>i</sub><sup>T</sup> · B<sub>j</sub> · v<sub>i</sub> = ∂λ<sub>i</sub>/∂k<sub>j</sub></code>
+</p>
 
 ---
 
-## 15 seconds to results
+## What
+
+**Spectral Flow Transform** is the derivative of the spectrum with respect to parameters.
+
+Given a linear operator family A(k) = A₀ + Σ kⱼ·Bⱼ, the kernel W captures the entire first-order spectral response:
+
+| Without SFT | With SFT |
+|-------------|----------|
+| `eigh(A(k))` for every perturbation k — **O(N³) each** | One `eigh` at build → `W·dk` — **O(N·M)** |
+| No way to *design* an operator for a target spectrum | `W⁺·(λ_target − λ₀)` — **closed-form inverse** |
+| Spectral topology requires custom code | Monodromy, Berry phase, exceptional points — built in |
+| Graph Laplacian → spectrum only | spectrum → edge weights via W⁺ — **inverse graph design** |
+
+**W is a universal Jacobian.** It compresses the spectral response of any linear operator family into a single matrix. Everything else — prediction, inverse design, topology, Hessian, invariants, domain adapters — follows from W.
+
+---
+
+## Quick start
+
+```bash
+pip install -e .
+```
 
 ```python
+import numpy as np
 import sft
 
-# Core
+# ── 1. Build a random 100×100 operator with 30 tunable parameters ──
 fam = sft.families.random(N=100, M=30)
-fam.W                    # (100,30) — ∂λ/∂k
-fam.predict(dk)          # λ(k₀+dk) in O(N·M)
-fam.inverse(target)      # find k matching target spectrum
-fam.complexity           # rank(W)/N — structural complexity
 
-# Adapters — killer feature
-pic   = sft.image(pixels, patch_size=8)
-sound = sft.audio(signal, sr=44100, n_bands=16)
-net   = sft.graph(adjacency)
+fam.W                    # (100,30) — spectral flow kernel
+fam.complexity           # rank(W)/N = 0.30 — low structural complexity
+fam.condition_number()   # κ(W) = 12.9 — well-conditioned
 
-# Natural language → operator
-fam = sft.from_task("sort these numbers", data)
+# ── 2. Predict how the spectrum shifts under a parameter change ──
+dk = 0.01 * np.random.randn(30)
+lam_pred = fam.predict(dk)          # 1st-order, O(N·M)
+lam_exact = fam.spectrum(dk)        # exact, O(N³)
+# max|λ_pred − λ_exact| < 5e-3 for ||dk|| = 0.01
 
-# Graphs — structural analysis O(1) after precompute
-gop = sft.graphop.GraphOperator(edges)
-gop.is_bridge(0, 1)       # O(1)
-gop.is_articulation(5)    # O(1)
+# ── 3. Inverse design: find parameters that produce a target spectrum ──
+target = np.sort(fam.lam0 + np.linspace(-0.15, 0.15, 100))
+k, err, converged = fam.inverse(target, steps=20, alpha=0.3)
+# converged → True, max|λ(k) − target| < 1e-2
 
-# Topology
+# ── 4. Algebra: combine operator families ──
+fam_ab = sft.algebra.direct_sum(fam_a, fam_b)      # A ⊕ B
+fam_comp = sft.algebra.compose_linear(outer, C)     # A ∘ B
+fam_kron = sft.algebra.tensor_sum(fam_a, fam_b)     # A ⊗ B
+stats = sft.algebra.expectation(fam, mu=np.zeros(30), sigma=0.1)
+
+# ── 5. Topology: eigenvalue braiding and Berry phase ──
+loop = [np.array([0.4*cos(t), 0.4*sin(t)]) for t in np.linspace(0, 2π, 60)]
 tracked, swaps = sft.topology.monodromy(fam, loop)
-holonomy = sft.topology.berry_holonomy(fam, loop)
+holonomy = sft.topology.berry_holonomy(fam, loop, level=0)
+# holonomy = −1 → Möbius topology, eigenvector flips sign over 2π
 
-# Operator algebra
-fam_sum = sft.algebra.direct_sum(a, b)   # ⊕
-fam_ten = sft.algebra.tensor_sum(a, b)   # ⊗
+# ── 6. Hessian: 2nd-order spectral curvature ──
+H = sft.hessian.analytic(fam)         # ∂²λ/∂k² tensor
+sparsity = sft.hessian.hessian_sparsity(H)
+curvature = sft.hessian.spectral_curvature(fam, direction=d)
 
-# Invariants — 5 keys in one call
+# ── 7. Invariants: 5 global spectral fingerprints ──
 fp = sft.invariants.all_invariants(fam)
-
-# Streaming CDF
-stream = sft.streaming.StreamingCDF(capacity=1000)
-for x in data_stream: stream.add(x)
-stream.cdf(threshold)
+# {svd_kurtosis, hessian_sparsity, poisson_preimage, w_coherence, zeta_fingerprint}
 ```
 
 ---
 
-## 22 modules
+## Killer feature — 12 domain adapters
 
-| Module | Purpose |
-|--------|---------|
-| `core` | `OperatorFamily`, W, W⁺, predict, inverse, nullspace |
-| `algebra` | ⊕ (direct sum), ∘ (composition), ⊗ (Kronecker sum), ∫ (expectation) |
-| `topology` | monodromy, Berry phase, exceptional points, spectral flow |
-| `hessian` | ∂²λ/∂k² — analytic and finite-difference |
-| `families` | random, graph_laplacian, toeplitz, diagonal, avoided_crossing |
-| `adapters` | 12 domain adapters (Audio…Mesh) |
-| `tasks` | classify_task, cdf_rank_sort, dct_matrix, filter_via_dct |
-| `constructor` | from_task("sort", data) → OperatorFamily |
-| `graphop` | bridges, articulation points, k-core in O(1) queries |
-| `embed` | deterministic graph embeddings |
-| `order` | CDF, rank, quantile, defect α-spectroscopy |
-| `cluster` | spectral clustering, kNN, auto-basis selection |
-| `compress` | spectral compression, DCT codec |
-| `transport` | 1D optimal transport (Monge map + W₂ distance) |
-| `streaming` | online CDF and ORDER operators |
-| `carleman` | GF(2)/GF(3) operators, complex Hermitian check |
-| `homotopy` | homotopy continuation, Tikhonov W⁺, trust-region |
-| `inversion` | bottleneck, fixed-point, monodromy inverse strategies |
-| `invariants` | 5 global invariants: kurtosis, sparsity, preimage, coherence, zeta |
-| `basis` | Toeplitz, DCT/Fourier, Gaussian affinity, graph generators |
-| `arnoldi` | Arnoldi iteration, Ritz values, Krylov solver |
-| `codec` | InstantSpectralCodec: M·Δk encode/decode |
-| `verify` | C1-C8 + S1-S5 theoretical verification suite |
+**Raw data → OperatorFamily in one call.** No preprocessing. No manual Laplacian construction. No feature extraction.
+
+```python
+# ── Audio ──
+sound = sft.audio(signal, sr=44100, n_bands=16)
+sound.kernel         # (16,16) — per-band EQ → spectrum response
+sound.predict(delta) # how EQ changes affect the spectral signature
+
+# ── Image ──
+pic = sft.image(pixels, patch_size=8, n_regions=16)
+pic.complexity       # structural complexity of the image
+pic.inverse(target)  # what brightness changes produce a target spectral fingerprint
+
+# ── Graph ──
+net = sft.graph(adjacency)
+net.kernel           # W(i,e) = (v_i(u)−v_i(v))² — how edge weights shift eigenvalues
+
+# ── Text ──
+doc = sft.text(["hello world hello", "foo bar baz"], max_words=500)
+doc.kernel           # co-occurrence Laplacian kernel
+doc.complexity       # semantic complexity of the corpus
+
+# ── Timeseries ──
+ts = sft.timeseries(signal, window_len=50)
+ts.kernel            # singular spectrum kernel (SSA)
+
+# ── 3D / Point clouds / Molecular / Financial / Tabular / Mesh ──
+vol = sft.voxel(mri_volume)           # 3D medical imaging
+pc  = sft.pointcloud(points, k=15)    # 3D point cloud → kNN Laplacian
+mol = sft.molecular(positions, types, bonds)  # molecule → Coulomb operator
+fin = sft.financial(returns, sectors, names)  # multi-asset → correlation operator
+tab = sft.tabular(data, feature_groups)       # tabular → feature covariance
+m   = sft.mesh(vertices, faces)               # 3D mesh → Laplace-Beltrami
+```
+
+**Every adapter exposes the same interface:** `.kernel`, `.predict()`, `.inverse()`, `.rank`, `.complexity`, `.spectrum`.
+
+---
+
+## Natural language → operator
+
+```python
+sft.classify_task("sort these numbers")    # → OperatorGenus.MONO
+sft.classify_task("bandpass filter 60Hz")  # → OperatorGenus.QUAD
+sft.classify_task("cluster by similarity") # → OperatorGenus.GRAPH
+
+# One call from task description to operator family:
+fam = sft.from_task("sort", data)          # → OperatorFamily (MONO, diagonal basis)
+fam = sft.from_task("filter", signal)      # → OperatorFamily (QUAD, toeplitz basis)
+fam = sft.from_task("compress", signal)    # → OperatorFamily (COMPRESS, toeplitz basis)
+```
+
+---
+
+## Graph analysis — O(1) queries after precompute
+
+```python
+edges = sft.basis.path_graph(1000)           # 1D chain
+# or: sft.basis.grid_graph_2d(30, 30)        # 2D grid
+# or: sft.basis.random_graph(500, 0.05)      # Erdős–Rényi
+# or: sft.basis.small_world_graph(200, 6, 0.1)  # Watts–Strogatz
+
+gop = sft.graphop.GraphOperator(edges)       # O(V+E) build — Tarjan + Batagelj-Zaveršnik
+
+# All queries O(1):
+gop.is_bridge(0, 1)          # is this edge a bridge?
+gop.is_articulation(5)       # is this vertex an articulation point?
+gop.k_core(3)                # vertices with coreness ≥ 3
+gop.bridges                  # set of all bridge edges
+gop.articulations            # set of all articulation points
+gop.coreness                 # per-vertex coreness array
+
+# Deterministic graph embeddings (no training, no SGD):
+emb = sft.embed.GraphEmbedder(adjacency, K=50, R=20)
+node_vec = emb.embed_node(0)                 # (2K+4)-dim vector
+graph_vec = emb.embed_graph()                # (K+R+5)-dim vector
+
+# Typed logical edges:
+lemb = sft.embed.LogicalGraphEmbedder(n, and_edges, not_edges, imply_edges)
+lemb.embed_node(0)          # signed Laplacian eigenvector coordinates
+
+# GF(3) ternary edges:
+L = sft.embed.ternary_laplacian(n, edges_weight1, edges_weight2)
+```
+
+---
+
+## CDF / ORDER — the MONO genus
+
+```python
+# Build a rank operator from samples:
+ranker = sft.order.UniversalRankOperator(data, n_bins=200)
+ranker.rank(values)          # predicted rank for each value
+ranker.quantile(0.5)         # median
+
+# Precompute-once, query O(log n):
+fast = sft.order.DefectPrecomputedCDF(data)
+fast.rank(3.14)              # O(log n) bisect
+fast.median                  # O(1)
+fast.iqr                     # interquartile range
+
+# CDF-based sorting:
+sorted_arr = sft.cdf_rank_sort(arr, n_bins=100)
+
+# α-defect spectroscopy:
+alphas = sft.rank_defect_analysis(arr, bins_list=[8, 16, 32, 64])
+# α(k) = log₂(||D_k|| / ||D_{2k}||) — the defect exponent
+
+# CDF from Carleman moments:
+cdf_curve = sft.carleman_cdf(moments, n_points=200)
+
+# Streaming:
+stream = sft.streaming.StreamingCDF(capacity=1000)
+for x in sensor_readings: stream.add(x)
+stream.cdf(threshold)
+stream.median
+```
+
+---
+
+## Spectral codec — instant encode/decode
+
+```python
+from sft.codec import InstantSpectralCodec
+
+# Build a codec on an operator family:
+codec = InstantSpectralCodec(fam)
+y = codec.encode(dk)          # y = W·dk — spectral response vector
+dk_hat = codec.decode(y)      # dk ≈ W⁺·y — parameter reconstruction
+err = codec.roundtrip_error(dk)
+
+# DCT codec (for signals):
+signal = np.sin(np.linspace(0, 10π, 256))
+reconstructed = sft.build_dct_codec(signal, keep_frac=0.5)
+```
+
+---
+
+## Homotopy continuation
+
+```python
+# Track spectral flow from an easy inverse to a hard target:
+k, err, converged = sft.homotopy.track_homotopy(
+    target_spectrum, n_steps=20, family=fam, adaptive=True
+)
+
+# Tikhonov-regularized pseudoinverse (stable even for ill-conditioned W):
+W_reg = sft.homotopy.regularised_pinv(W, reg=1e-6)
+
+# Trust-region corrector step:
+dk = sft.homotopy.trust_region_corrector(x, target, W, radius=1.0)
+```
+
+---
+
+## Inversion strategies
+
+```python
+# Bottleneck — factor W ≈ A·diag·B, invert through low-dim manifold:
+k = sft.inversion.bottleneck_inverse(fam, target, bottleneck_dim=5)
+
+# Fixed-point — split into linear/nonlinear params, freeze, iterate:
+k = sft.inversion.fixed_point_inverse(fam, target, linear_idx=[0, 1])
+
+# Monodromy — 2π walk around complex branch cut:
+k = sft.inversion.monodromy_inverse(fam, n_pts_circle=60, radius=1.0)
+```
+
+---
+
+## GF(2)/GF(3), complex Hermitian, Arnoldi
+
+```python
+# Finite fields:
+gf2_fam = sft.carleman.operator_family_gf2(n=4, m=6)
+gf3_fam = sft.carleman.operator_family_gf3(n=4, m=6)
+
+# Complex Hermitian HF verification:
+W_real, W_imag = sft.carleman.complex_hf_check(n=6, m=12)
+
+# Arnoldi iteration:
+Q, H = sft.arnoldi.arnoldi_iteration(lambda x: A @ x, v0, m=40)
+ritz_vals = sft.arnoldi.ritz_eigenvalues(H)
+x_krylov = sft.arnoldi.krylov_solve(lambda x: A @ x, b, m=30)
+```
+
+---
+
+## Verification suite
+
+```python
+results = sft.verify.run_verification_suite()
+# C1: Fourier ⊂ SFT        → True
+# C2: τ-invariance          → check
+# C3: W-entropy             → log|det(WW^T)|
+# C4: rank separability     → ORDER vs GRAPH
+# C5: defect universality   → Gaussian vs Uniform α
+# C6: monodromy class       → Z₂ holonomy
+# C7: Hessian sparsity      → fraction near-zero
+# C8: universal embedding   → valid node/graph vectors
+# S1: complexity = rank(W)  → True
+# S2: perturbation theory   → O(||dk||²) verified
+# S3: drum shape            → rank detects structure
+# S4: information bound     → log|det| ≥ 0
+# S5: RMT vs defect         → KS distance
+```
+
+---
+
+## Architecture
+
+```
+                     ┌──────────┐
+  Raw data ─────────→│ Adapters │──→ OperatorFamily ←── sft.families.*
+  (audio, image,     │ (12)     │       │                 (random, graph,
+   graph, text, ...) └──────────┘       │                  toeplitz, ...)
+                                        │
+                    ┌───────────────────┼───────────────────┐
+                    │                   │                   │
+               ┌────▼─────┐      ┌─────▼──────┐     ┌─────▼──────┐
+               │  Predict  │      │   Inverse   │     │  Topology  │
+               │ λ₀ + W·dk │      │  W⁺·Δλ → k │     │ monodromy  │
+               └──────────┘      └────────────┘     │   Berry    │
+                                                     └────────────┘
+                    │
+     ┌──────────────┼──────────────┬──────────────┬──────────────┐
+     │              │              │              │              │
+┌────▼────┐  ┌─────▼──────┐ ┌─────▼─────┐ ┌─────▼─────┐ ┌─────▼─────┐
+│ Algebra  │  │  Hessian   │ │ Order/CDF │ │  GraphOp  │ │ Embedding │
+│ ⊕ ∘ ⊗ ∫ │  │ ∂²λ/∂k²    │ │ rank/sort │ │ bridges   │ │ spectral+ │
+└─────────┘  └────────────┘ │ quantile  │ │ k-core    │ │ structural│
+                             └───────────┘ └───────────┘ └───────────┘
+```
 
 ---
 
 ## Theoretical foundations
 
-SFT generalizes the Fourier transform to non-commutative operators.
-Fourier ⊂ SFT: for circulant operators, W coincides with DFT.
-For arbitrary A(k) = A₀ + Σ kⱼ·Bⱼ, W gives the full spectral Jacobian.
+### Fourier ⊂ SFT
 
-**rank(W) = computational complexity of the task:**
-- rank(W) = 1 → ORDER regime (sorting, CDF)
-- rank(W) ≪ N → structure (graphs, filters)
-- rank(W) ≈ N → random (no shortcut)
+For circulant operators, the eigenvectors are Fourier modes: v_i(k) = e^{2πi·k·x/N}. The HF formula reduces to W(i,j) = |DFT(B_j)|²ᵢ — the squared Fourier coefficient. SFT recovers the standard Fourier spectral decomposition. For non-circulant operators, SFT gives the generalized spectral derivative where no Fourier basis exists.
 
-**nullspace(W) = isospectral manifold:**
-dim(ker(W)) directions in k-space do not change the spectrum.
-The operator "cannot hear" them.
+### rank(W) = computational complexity
+
+| Task | Operator type | rank(W) | Complexity class |
+|------|--------------|---------|-----------------|
+| Sort / CDF / quantile | Diagonal (MONO) | 1 | O(log n) query |
+| Filter / bandpass | Toeplitz (QUAD) | ~K passbands | O(K·N) precompute |
+| Cluster / segment | Graph Laplacian | ~#clusters | O(V+E) precompute |
+| Compress / codec | Autocorrelation | ~K modes | O(K·N) truncate |
+| Random / no structure | Full rank | N | No shortcut |
+
+**Key insight:** rank(W) replaces O(N log N) as the fundamental complexity measure. If rank(W) ≪ N, the operator has exploitable structure.
+
+### nullspace(W) = isospectral manifold
+
+dim(ker(W)) = M − rank(W) — the number of directions in parameter space that do NOT change the spectrum. These are "ghost" parameters — the operator literally cannot hear them. This is the spectral analog of Kac's "Can one hear the shape of a drum?" — ker(W) consists of exactly the parameter directions that are spectrally silent.
 
 ---
 
 ## Install
 
 ```bash
+git clone git@github.com:dimaq12/spectral_flow.git
+cd spectral_flow
 pip install -e .
 ```
 
-Dependencies: `numpy>=1.24`, `scipy>=1.10`. Python ≥ 3.10.
+**Requirements:** Python ≥ 3.10, numpy ≥ 1.24, scipy ≥ 1.10.
 
 ---
 
 ## License
 
-MIT
+MIT — Dmitry Sierikov, 2026.
