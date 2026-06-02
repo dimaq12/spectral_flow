@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.backends._legacy:_Backend"
+
+[project]
+name = "sft"
+version = "0.1.0"
+description = "Spectral Flow Transform — unified parametric eigenvalue perturbation theory"
+readme = "README.md"
+license = { text = "MIT" }
+authors = [
+    { name = "SFT Authors" },
+]
+requires-python = ">=3.10"
+dependencies = [
+    "numpy>=1.24",
+    "scipy>=1.10",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-cov",
+]
+
+[tool.setuptools]
+packages = ["sft", "sft.adapters", "sft.tests"]
+
+[tool.setuptools.package-data]
+sft = ["*.py"]
+"sft.adapters" = ["*.py"]
+"sft.tests" = ["*.py"]
+
+[tool.pytest.ini_options]
+testpaths = ["sft/tests"]
+python_files = ["test_*.py"]
+addopts = ["-v", "--tb=short"]
