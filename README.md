@@ -373,86 +373,25 @@ dim(ker(W)) = M − rank(W) — the number of directions in parameter space that
 
 ---
 
-## What you can build — with real metrics
+## Demos — real metrics, every one runnable
 
-Each demo is a runnable script in [`examples/`](examples/). Reports generated in [`examples/reports/`](examples/reports/).
+Each demo is a Python script in [`examples/`](examples/) that generates a full report in [`examples/reports/`](examples/reports/).
+Run them all: `python3 examples/demo_*.py`
 
-### [Scale benchmark](examples/reports/benchmark_scale.md)
-N=50..500, M=10..100. Build+inverse+monodromy+hessian timing.
+| Demo | What it shows | Key result | Full report |
+|------|--------------|------------|-------------|
+| **Scale benchmark** | N=50..500, build/predict/inverse timing | Inverse 500×500 in 1.6s | [`md`](examples/reports/benchmark_scale.md) |
+| **Adapter load test** | All 12 adapters in one run | Max build 1.7s across all domains | [`md`](examples/reports/benchmark_adapters.md) |
+| **Cosmic dynamics** | Gravitational N-body Jacobian | complexity=0.20, build 51ms | [`md`](examples/reports/cosmic_dynamics.md) |
+| **PDE spectroscopy** | Defect α-recovery across distributions | Normal α=1.22, Cauchy α=1.42 | [`md`](examples/reports/pde_spectroscopy.md) |
+| **Graph sorting** | CDF sort 200K × 3 distributions | **Zero error** vs numpy.sort | [`md`](examples/reports/graph_sorting.md) |
+| **Electrodynamics** | Maxwell 4/3 mass → rank deficit | ratio=1.333, rank(W_EM)=1 | [`md`](examples/reports/electrodynamics.md) |
+| **Logical embeddings** | AND/NOT/IMPLY typed edges | 100 nodes × 32-d, build 1ms | [`md`](examples/reports/logical_embeddings.md) |
+| **Graph operator** | O(1) bridge/articulation queries | V=5000, build 61ms | [`md`](examples/reports/graph_operator.md) |
+| **Spectral codec** | W·dk encode, W⁺·y decode | Roundtrip **1.0e-15** | [`md`](examples/reports/spectral_codec.md) |
+| **Spectral topology** | Berry holonomy + monodromy | Holonomy = **−1**, 783ms | [`md`](examples/reports/spectral_topology.md) |
 
-### [Adapter load test](examples/reports/benchmark_adapters.md)
-All 12 adapters in one run — audio, image, graph, text, timeseries, video, voxel, pointcloud, molecular, financial, tabular, mesh.
-
-### [Cosmic dynamics](examples/reports/cosmic_dynamics.md)
-Spectral Jacobian of gravitational N-body operator. Complexity=0.200, build 51ms.
-
-```python
-fam = sft.OperatorFamily(gravitational_potential, mass_basis)
-print(f"complexity = {fam.complexity:.3f}")  # → 0.200
-```
-
-### [PDE spectroscopy](examples/reports/pde_spectroscopy.md)
-
-Recover exact PDE spectrum from 3 resolution runs. α-spectroscopy across distributions.
-
-```python
-alphas = sft.rank_defect_analysis(solver_output, bins_list=[8, 16, 32, 64])
-```
-
-### [Graph sorting](examples/reports/graph_sorting.md)
-
-Zero error vs numpy.sort on 200K elements across 3 distributions.
-
-```python
-sorted_arr = sft.cdf_rank_sort(data, n_bins=200)
-assert np.array_equal(sorted_arr, np.sort(data))  # True
-```
-
-### [Electrodynamics](examples/reports/electrodynamics.md)
-
-Maxwell's 4/3 mass paradox: rank(W_EM) = 1, ratio = 1.333333.
-
-```python
-print(f"rank(W_EM)={fam.W_rank}, deficit={4-fam.W_rank}")  # → deficit=3
-```
-
-### [Logical embeddings](examples/reports/logical_embeddings.md)
-
-AND/NOT/IMPLY edges — negation repels. Build 1ms for 100 nodes × 32-d.
-
-```python
-lemb = sft.embed.LogicalGraphEmbedder(n, and_edges, not_edges, imply_edges, K=64)
-```
-
-### [Graph operator](examples/reports/graph_operator.md)
-
-V=5000, build 61ms. Bridge/articulation queries O(1).
-
-```python
-gop = sft.graphop.GraphOperator(edges)
-print(gop.is_bridge(0, 1))  # O(1)
-```
-
-### [Spectral codec](examples/reports/spectral_codec.md)
-
-Roundtrip error 1.0e-15 — machine precision. Encode 0μs.
-
-```python
-codec = sft.codec.InstantSpectralCodec(fam)
-err = np.max(np.abs(codec.decode(codec.encode(dk)) - dk))  # → 1e-15
-```
-
-### [Spectral topology](examples/reports/spectral_topology.md)
-
-Berry holonomy = −1 (Möbius strip). Monodromy 783ms for 60 points.
-
-```python
-hol = sft.topology.berry_holonomy(fam, loop, level=1)  # → −1
-```
-
----
-
-**One kernel. 8 demos. All running. All converging to machine zero. All built on W.**
+**One kernel. 10 demos. All running. Machine zero. Built on W.**
 
 ---
 
