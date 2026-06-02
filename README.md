@@ -9,6 +9,10 @@
   <code>W(i,j) = v<sub>i</sub><sup>T</sup> · B<sub>j</sub> · v<sub>i</sub> = ∂λ<sub>i</sub>/∂k<sub>j</sub></code>
 </p>
 
+<p align="center">
+  <img src="spectral_flow_banner.png" alt="Spectral Flow Transform" width="800">
+</p>
+
 ---
 
 ## What
