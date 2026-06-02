@@ -6,55 +6,55 @@
 W(i,j) = v_iᵀ · B_j · v_i  =  ∂λ_i/∂k_j
 ```
 
-A(k) = A₀ + Σ kⱼ·Bⱼ — линейное семейство операторов.  
-W — матрица спектрального потока: одна диагонализация → все производные собственных чисел по всем параметрам.
+A(k) = A₀ + Σ kⱼ·Bⱼ — a linear operator family.  
+W is the spectral flow kernel: one diagonalization → all eigenvalue derivatives w.r.t. all parameters.
 
 ---
 
-## Зачем
+## Why
 
-| Раньше | Сейчас |
-|--------|--------|
-| Для каждого возмущения k — новый `eigh` O(N³) | Один `eigh` при сборке, потом `W·dk` за O(N·M) |
-| Spectral flow — абстрактная теория | W как Jacobian оператора — предсказание, inverse design, топология |
-| Каждый домен — свой код | 12 адаптеров: аудио, изображение, граф, текст, видео, воксель, point cloud, молекула, финансы, таблица, меш |
+| Before | After |
+|--------|-------|
+| Every perturbation k → new `eigh` O(N³) | One `eigh` at build, then `W·dk` at O(N·M) |
+| Spectral flow as abstract theory | W as the operator's Jacobian — prediction, inverse design, topology |
+| Each domain — custom code | 12 adapters: audio, image, graph, text, video, voxel, point cloud, molecule, finance, tabular, mesh |
 
 ---
 
-## 15 секунд до результата
+## 15 seconds to results
 
 ```python
 import sft
 
-# Ядро
+# Core
 fam = sft.families.random(N=100, M=30)
 fam.W                    # (100,30) — ∂λ/∂k
-fam.predict(dk)          # λ(k₀+dk) за O(N·M)
-fam.inverse(target)      # найти k под целевой спектр
-fam.complexity           # rank(W)/N — структурная сложность
+fam.predict(dk)          # λ(k₀+dk) in O(N·M)
+fam.inverse(target)      # find k matching target spectrum
+fam.complexity           # rank(W)/N — structural complexity
 
-# Адаптеры — killer feature
+# Adapters — killer feature
 pic   = sft.image(pixels, patch_size=8)
 sound = sft.audio(signal, sr=44100, n_bands=16)
 net   = sft.graph(adjacency)
 
-# Задача на естественном языке → оператор
+# Natural language → operator
 fam = sft.from_task("sort these numbers", data)
 
-# Графы — структурный анализ O(1) после precompute
+# Graphs — structural analysis O(1) after precompute
 gop = sft.graphop.GraphOperator(edges)
 gop.is_bridge(0, 1)       # O(1)
 gop.is_articulation(5)    # O(1)
 
-# Топология
+# Topology
 tracked, swaps = sft.topology.monodromy(fam, loop)
 holonomy = sft.topology.berry_holonomy(fam, loop)
 
-# Алгебра операторов
+# Operator algebra
 fam_sum = sft.algebra.direct_sum(a, b)   # ⊕
 fam_ten = sft.algebra.tensor_sum(a, b)   # ⊗
 
-# Инварианты — 5 ключей за один вызов
+# Invariants — 5 keys in one call
 fp = sft.invariants.all_invariants(fam)
 
 # Streaming CDF
@@ -65,63 +65,63 @@ stream.cdf(threshold)
 
 ---
 
-## 22 модуля
+## 22 modules
 
-| Модуль | Что делает |
-|--------|-----------|
+| Module | Purpose |
+|--------|---------|
 | `core` | `OperatorFamily`, W, W⁺, predict, inverse, nullspace |
-| `algebra` | ⊕, ∘, ⊗, ∫ ожидание |
-| `topology` | монодромия, фаза Берри, exceptional points, spectral flow |
-| `hessian` | ∂²λ/∂k² — аналитически и конечно-разностно |
+| `algebra` | ⊕ (direct sum), ∘ (composition), ⊗ (Kronecker sum), ∫ (expectation) |
+| `topology` | monodromy, Berry phase, exceptional points, spectral flow |
+| `hessian` | ∂²λ/∂k² — analytic and finite-difference |
 | `families` | random, graph_laplacian, toeplitz, diagonal, avoided_crossing |
-| `adapters` | 12 доменных адаптеров (Audio…Mesh) |
+| `adapters` | 12 domain adapters (Audio…Mesh) |
 | `tasks` | classify_task, cdf_rank_sort, dct_matrix, filter_via_dct |
 | `constructor` | from_task("sort", data) → OperatorFamily |
-| `graphop` | мосты, точки сочленения, k-core за O(1) |
-| `embed` | детерминированные графовые эмбеддинги |
-| `order` | CDF, ранг, квантиль, дефект-спектроскопия |
-| `cluster` | спектральная кластеризация, kNN, авто-базис |
-| `compress` | спектральное сжатие, DCT codec |
-| `transport` | оптимальный транспорт 1D (Monge map + W₂) |
-| `streaming` | онлайн CDF и ORDER |
-| `carleman` | GF(2)/GF(3) операторы, комплексный HF |
-| `homotopy` | гомотопическое продолжение, Tikhonov W⁺, trust-region |
-| `inversion` | bottleneck, fixed_point, monodromy inverse |
-| `invariants` | 5 глобальных инвариантов: kurtosis, sparsity, preimage, coherence, zeta |
-| `basis` | Toeplitz, DCT/Fourier, affinity, граф-генераторы |
-| `arnoldi` | итерация Арнольди, Ritz, Krylov |
+| `graphop` | bridges, articulation points, k-core in O(1) queries |
+| `embed` | deterministic graph embeddings |
+| `order` | CDF, rank, quantile, defect α-spectroscopy |
+| `cluster` | spectral clustering, kNN, auto-basis selection |
+| `compress` | spectral compression, DCT codec |
+| `transport` | 1D optimal transport (Monge map + W₂ distance) |
+| `streaming` | online CDF and ORDER operators |
+| `carleman` | GF(2)/GF(3) operators, complex Hermitian check |
+| `homotopy` | homotopy continuation, Tikhonov W⁺, trust-region |
+| `inversion` | bottleneck, fixed-point, monodromy inverse strategies |
+| `invariants` | 5 global invariants: kurtosis, sparsity, preimage, coherence, zeta |
+| `basis` | Toeplitz, DCT/Fourier, Gaussian affinity, graph generators |
+| `arnoldi` | Arnoldi iteration, Ritz values, Krylov solver |
 | `codec` | InstantSpectralCodec: M·Δk encode/decode |
-| `verify` | C1-C8 + S1-S5 верификация теорем |
+| `verify` | C1-C8 + S1-S5 theoretical verification suite |
 
 ---
 
-## Теоретические основы
+## Theoretical foundations
 
-SFT обобщает преобразование Фурье на некоммутативные операторы.
-Fourier ⊂ SFT: для циркулянтных операторов W совпадает с DFT.
-Для произвольных A(k) = A₀ + Σ kⱼ·Bⱼ — W даёт полный Jacobian спектра.
+SFT generalizes the Fourier transform to non-commutative operators.
+Fourier ⊂ SFT: for circulant operators, W coincides with DFT.
+For arbitrary A(k) = A₀ + Σ kⱼ·Bⱼ, W gives the full spectral Jacobian.
 
-**Ранг W = вычислительная сложность задачи:**
-- rank(W) = 1 → ORDER-режим (сортировка, CDF)
-- rank(W) ≪ N → структура (графы, фильтры)
-- rank(W) ≈ N → random (нет shortcut)
+**rank(W) = computational complexity of the task:**
+- rank(W) = 1 → ORDER regime (sorting, CDF)
+- rank(W) ≪ N → structure (graphs, filters)
+- rank(W) ≈ N → random (no shortcut)
 
-**Nullspace W = изоспектральное многообразие:**
-dim(ker(W)) направлений в k-пространстве не меняют спектр.
-Оператор их «не слышит».
+**nullspace(W) = isospectral manifold:**
+dim(ker(W)) directions in k-space do not change the spectrum.
+The operator "cannot hear" them.
 
 ---
 
-## Установка
+## Install
 
 ```bash
 pip install -e .
 ```
 
-Зависимости: `numpy>=1.24`, `scipy>=1.10`. Python ≥ 3.10.
+Dependencies: `numpy>=1.24`, `scipy>=1.10`. Python ≥ 3.10.
 
 ---
 
-## Лицензия
+## License
 
 MIT
