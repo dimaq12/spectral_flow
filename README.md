@@ -62,7 +62,7 @@ The speedup isn't about avoiding `eigh` entirely — that's impossible for spect
 ## Quick start
 
 ```bash
-pip install -e .
+pip install spectral-flow
 ```
 
 ```python
@@ -378,7 +378,7 @@ dim(ker(W)) = M − rank(W) — the number of directions in parameter space that
 ```bash
 git clone git@github.com:dimaq12/spectral_flow.git
 cd spectral_flow
-pip install -e .
+pip install spectral-flow
 ```
 
 **Requirements:** Python ≥ 3.10, numpy ≥ 1.24, scipy ≥ 1.10.
