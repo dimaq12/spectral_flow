@@ -73,7 +73,7 @@ sft — Spectral Flow Transform v0.1.0
     gop = sft.graphop.GraphOperator(edges)
     if gop.is_bridge(0, 1): print("Critical edge!")
 """
-__version__ = "0.1.1"
+__version__ = "0.1.2"
 
 from .core import OperatorFamily, nullspace
 from . import algebra, topology, hessian, families
