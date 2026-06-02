@@ -80,7 +80,7 @@ from . import algebra, topology, hessian, families
 from . import tasks, constructor, homotopy, graphop
 from . import compress, streaming, order, embed
 from . import cluster, carleman, transport, verify
-from . import basis, arnoldi, inversion, invariants
+from . import basis, graph_gen, arnoldi, inversion, invariants
 from . import codec as codec
 from .adapters import (
     AudioAdapter, ImageAdapter, GraphAdapter, TextAdapter, TimeseriesAdapter,
@@ -113,7 +113,7 @@ __all__ = [
     "tasks", "constructor", "homotopy", "graphop",
     "compress", "streaming", "order", "embed",
     "cluster", "carleman", "transport", "verify",
-    "basis", "arnoldi", "inversion", "invariants", "codec",
+    "basis", "graph_gen", "arnoldi", "inversion", "invariants", "codec",
     "AudioAdapter", "ImageAdapter", "GraphAdapter", "TextAdapter", "TimeseriesAdapter",
     "VideoAdapter", "VoxelAdapter", "PointCloudAdapter", "MolecularAdapter",
     "FinancialAdapter", "TabularAdapter", "MeshAdapter",

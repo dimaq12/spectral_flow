@@ -13,9 +13,10 @@ sft/universal_demo.py — SFT applied to EVERYTHING.
   sft.timeseries(data).kernel    → W for lag weights
 """
 from __future__ import annotations
-import sys
+import sys, os
 import numpy as np
-sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parent.parent))
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 import sft
 
 
