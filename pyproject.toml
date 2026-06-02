@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "spectral-flow"
-version = "0.1.0"
+version = "0.1.1"
 description = "Spectral Flow Transform — one formula, one kernel, all operators"
 readme = "README.md"
 license = { text = "MIT" }
