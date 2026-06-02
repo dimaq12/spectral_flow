@@ -103,7 +103,7 @@ def verify_s2_perturbation_theory() -> bool:
 def verify_s3_drum_shape() -> bool:
     """S3: dirichlet_laplacian spectrum → W rank → detect shape changes."""
     from .families import graph_laplacian
-    from .basis import path_graph, star_graph
+    from .graph_gen import path_graph, star_graph
     fam_p = graph_laplacian(path_graph(20))
     fam_s = graph_laplacian(star_graph(20))
     return fam_p.W_rank != fam_s.W_rank
