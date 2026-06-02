@@ -373,87 +373,140 @@ dim(ker(W)) = M − rank(W) — the number of directions in parameter space that
 
 ---
 
-## What you can build — real experiments, machine-zero precision
+## What you can build — with real metrics
 
-Every example below runs on SFT. Most converge to **machine epsilon** or better.
+Every example is runnable. Full demos: [`examples/`](examples/)
 
-### Cosmic dynamics — Jacobian of galaxy formation
+### [Cosmic dynamics](examples/cosmic_dynamics.md) — Jacobian of galaxy formation
 
-Compute the exact spectral Jacobian of a gravitational N-body operator. Dark matter distribution → W kernel → predict how eigenvalues shift under mass perturbations. **rank(W) detects the transition from linear clustering to non-linear collapse.** One `eigh` replaces thousands of simulations.
+Spectral Jacobian of gravitational N-body operator. rank(W) detects the phase transition from linear clustering to non-linear collapse.
+
+| Metric | Value |
+|--------|-------|
+| Kernel size | 100 × 20 |
+| complexity | 0.20 |
+| κ(W) | 12.9 |
 
 ```python
-# Build operator from mass distribution
 fam = sft.OperatorFamily(gravitational_potential, mass_basis)
-W = fam.W  # ∂(structure eigenvalues)/∂(mass parameters)
-fam.complexity  # rank(W)/N → phase transition indicator
+fam.complexity  # → 0.20 — linear regime
 ```
 
-### PDE spectral inversion — defect to machine zero
+### [PDE spectroscopy](examples/pde_spectroscopy.md) — machine-zero spectral recovery
 
-The defect operator D_n = P_n − P_{2n} measures numerical error. SFT recovers the **exact PDE spectrum** from defect measurements across only 3 resolutions (n, 2n, 4n). No governing equations needed. **Per-mode ratio converges to 1.0000 — machine zero.**
+Recover exact PDE spectrum from 3 resolution runs. No governing equations needed.
+
+| Metric | Value |
+|--------|-------|
+| Per-mode ratio | **1.0000** (machine zero) |
+| Normal(0,1) α | 1.22 |
+| Cauchy(0,1) α | 1.42 |
+| Uniform(0,1) α | 1.77 |
 
 ```python
-# Recover operator spectrum from black-box PDE solver
 alphas = sft.rank_defect_analysis(solver_output, bins_list=[8, 16, 32, 64])
-# α(k) = log₂(||D_k|| / ||D_{2k}||) → F(z) — the universal spectral function
 ```
 
-### Graph sorting — rank in O(log n), sort in O(n)
+### [Graph sorting](examples/graph_sorting.md) — zero mismatch vs numpy.sort
 
-Precompute once, query forever. CDF-based rank operator sorts 1M numbers with **zero mismatch vs numpy.sort** — not approximate, exact.
+Precompute once, query rank O(log n). Sort 200K elements across 3 distributions.
+
+| Metric | Value |
+|--------|-------|
+| Error vs np.sort | **0.0e+00** (exact) |
+| Uniform 200K | 160ms, 86.5% corrected |
+| Normal 200K | 249ms, 86.4% corrected |
+| Cauchy 200K | 232ms, 86.4% corrected |
+| ORDER rank_array | **2.2× faster** than searchsorted |
+| ORDER radix sort | **49.9× faster** than C qsort |
 
 ```python
-ranker = sft.order.DefectPrecomputedCDF(data)
-ranker.rank(3.14)     # O(log n) — exact position in sorted order
-ranker.median          # O(1)
-sorted_arr = sft.cdf_rank_sort(arr, n_bins=100)  # exact match with np.sort
+sorted_arr = sft.cdf_rank_sort(data, n_bins=200)
+assert np.array_equal(sorted_arr, np.sort(data))  # True
 ```
 
-### Electrodynamics — the 4/3 mass problem resolved
+### [Electrodynamics](examples/electrodynamics.md) — the 4/3 mass problem resolved
 
-Maxwell's 130-year-old electromagnetic mass paradox: m_inertial / m_rest = 4/3 instead of 1. SFT reveals why: **rank(W_EM) < 4** — the energy-momentum Jacobian has a rank deficit. Poincaré stress restores full rank. The missing 1/4 is a **spectral degree of freedom invisible to standard field theory.**
+Maxwell's 130-year-old paradox: m_inertial/m_rest = 4/3. SFT reveals the cause.
+
+| Metric | Value |
+|--------|-------|
+| 4/3 ratio | **1.333333** |
+| rank(W_EM) | **3** (deficit = 1) |
+| Poincaré stress | ratio → **1.000000**, rank → 4 |
 
 ```python
-# W_EM = ∂P^μ/∂v — 4×4 Jacobian of 4-momentum
-W_em = compute_W(v0, k0)  # build from field configuration
-rank_deficit = 4 - W_em.rank  # = 1 for pure Maxwell, = 0 with Poincaré stress
+# W_EM = ∂P^μ/∂v — one spectral degree of freedom enslaved
+print(f"rank(W_EM) = {fam.W_rank}, deficit = {4 - fam.W_rank}")
 ```
 
-### Graph embeddings with logic baked into edges
+### [Logical embeddings](examples/logical_embeddings.md) — logic baked into edges
 
-Embed words, molecules, or knowledge graphs using **typed edges: AND, NOT, IMPLY.** The Laplacian has signed off-diagonals — negation literally repels in embedding space. No training. No SGD. Deterministic.
+Shakespeare sonnets → 200-word graph. AND/NOT/IMPLY edges. NOT literally repels in embedding space.
+
+| Metric | Value |
+|--------|-------|
+| Build time | **110ms** |
+| Embedding | 200 nodes × 64-d |
+| love → sweet | cosine 0.052 |
+| beauty → sweet | cosine 0.055 |
+| truth → love | cosine 0.063 |
 
 ```python
-# "love" AND "heart" = attract, "love" NOT "hate" = repel
-lemb = sft.embed.LogicalGraphEmbedder(n, and_edges, not_edges, imply_edges)
-lemb.embed_node(0)  # spectral coordinates with logical constraints
-# → "beauty" nearest to "fair" at cosine distance 0.08 (Shakespeare sonnets)
+lemb = sft.embed.LogicalGraphEmbedder(n, and_edges, not_edges, imply_edges, K=64)
+# NOT edges → signed Laplacian off-diagonals → spectral repulsion
 ```
 
-### Instant spectral codec — encode in microseconds
+### [Graph operator](examples/graph_operator.md) — 8543× speedup on bridges
 
-Encode any signal through a spectral operator: `y = W·dk`. Decode back: `dk ≈ W⁺·y`. One matrix multiply each way. **Roundtrip error < 1e-12 for structured operators.**
+Precompute all structural properties O(V+E). Every query O(1).
+
+| Metric | Value |
+|--------|-------|
+| V=5000, E=25000 build | **49.6ms** |
+| `is_bridge` speedup | **8543×** (0.24ms vs 2024ms) |
+| `connected` speedup | **6478×** (0.29ms vs 1878ms) |
+| V=10000, E=40000 build | **88.6ms** |
+
+```python
+gop = sft.graphop.GraphOperator(edges)
+gop.is_bridge(0, 1)  # O(1)
+```
+
+### [Spectral codec](examples/spectral_codec.md) — machine-zero roundtrip
+
+Encode signal → W·dk. Decode → W⁺·y. One matrix multiply each way.
+
+| Metric | Value |
+|--------|-------|
+| rank(W) | 16/16 (full) |
+| Roundtrip error | **9.99e-16** |
+| Encode time | microseconds |
+| Decode time | microseconds |
 
 ```python
 codec = sft.codec.InstantSpectralCodec(fam)
-y = codec.encode(dk)       # microseconds
-dk_hat = codec.decode(y)    # microseconds
-err = codec.roundtrip_error(dk)  # → machine zero
+y = codec.encode(dk); dk_hat = codec.decode(y)
+err = np.max(np.abs(dk_hat - dk))  # → 9.99e-16
 ```
 
-### Monodromy — eigenvalues that swap places
+### [Spectral topology](examples/spectral_topology.md) — Möbius strip of eigenvectors
 
-Walk a closed loop around an exceptional point in parameter space. **Eigenvalues exchange positions after a 2π loop.** Berry holonomy = −1 reveals Möbius topology of the eigenvector bundle. All computed from W.
+Walk a closed loop around an exceptional point.
+
+| Metric | Value |
+|--------|-------|
+| Berry holonomy | **−1** (Möbius topology) |
+| Loop points | 60 |
+| Time | 908ms |
 
 ```python
-loop = [np.array([r*cos(t), r*sin(t)]) for t in np.linspace(0, 2π, 60)]
-tracked, swaps = sft.topology.monodromy(fam, loop)
-holonomy = sft.topology.berry_holonomy(fam, loop)  # −1 = topological charge
+hol = sft.topology.berry_holonomy(fam, loop, level=1)  # → −1
 ```
 
 ---
 
-**One kernel. Cosmic dynamics → PDE spectra → graph sorting → electromagnetism → logical embeddings → spectral topology. All converging to machine zero. All built on W.**
+**One kernel. Cosmic dynamics → PDE spectra → graph sorting → electrodynamics → logical embeddings → spectral topology. All converging to machine zero. All built on W.**
 
 ---
 
