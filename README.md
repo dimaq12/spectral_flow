@@ -375,10 +375,15 @@ dim(ker(W)) = M − rank(W) — the number of directions in parameter space that
 
 ## What you can build — with real metrics
 
-Each demo is a runnable script in [`examples/`](examples/). Generated reports in [`examples/reports/`](examples/reports/).
+Each demo is a runnable script in [`examples/`](examples/). Reports generated in [`examples/reports/`](examples/reports/).
+
+### [Scale benchmark](examples/reports/benchmark_scale.md)
+N=50..500, M=10..100. Build+inverse+monodromy+hessian timing.
+
+### [Adapter load test](examples/reports/benchmark_adapters.md)
+All 12 adapters in one run — audio, image, graph, text, timeseries, video, voxel, pointcloud, molecular, financial, tabular, mesh.
 
 ### [Cosmic dynamics](examples/reports/cosmic_dynamics.md)
-
 Spectral Jacobian of gravitational N-body operator. Complexity=0.200, build 51ms.
 
 ```python
