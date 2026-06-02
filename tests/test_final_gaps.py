@@ -1,8 +1,8 @@
 """Tests for sft.basis, arnoldi, and predict_at fix."""
 import numpy as np
 import pytest
-from sft.basis import (toeplitz_from_signal, gaussian_affinity, build_laplacian,
-                        path_graph, grid_graph_2d, random_graph, small_world_graph, star_graph)
+from sft.basis import toeplitz_from_signal, gaussian_affinity
+from sft.graph_gen import build_laplacian, path_graph, grid_graph_2d, random_graph, small_world_graph, star_graph
 from sft.arnoldi import arnoldi_iteration, ritz_eigenvalues, krylov_solve
 from sft.families import random as randfam
 
