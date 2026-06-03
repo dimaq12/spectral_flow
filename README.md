@@ -131,6 +131,31 @@ Performance is part of the contract: algebra operations report when they may
 materialize a structured basis, when tensor products grow the state space, and
 which eigensolver path is expected.
 
+Jordan-fused algebra is the first promoted high-order exceptional-point
+constructor.  A plain tensor sum composes spectra but does not fuse Jordan
+chains; `jordan_fuse` adds the missing chain coupling and a closure perturbation
+so the resulting family exposes EP4 scaling.
+
+```python
+ep = sft.physics.exceptional_point_2x2().family()
+plain = sft.algebra.tensor_sum(ep, ep)
+fused = sft.algebra.jordan_fuse(ep, ep)
+
+assert not sft.algebra.jordan_fingerprint(plain.A0).is_single_chain
+assert sft.algebra.jordan_fingerprint(fused.A0).is_single_chain
+print(fused.jordan_coupling)  # (1, 2)
+
+# Higher-order synthesis needs multiple bridges.
+ep4 = sft.algebra.jordan_fuse(ep, ep, add_closure=False)
+ep16 = sft.algebra.multi_jordan_fuse(ep4, ep4)
+assert sft.algebra.jordan_fingerprint(ep16.A0).nilpotent_index == 16
+print(ep16.jordan_couplings)  # ((3, 4), (7, 8), (11, 12))
+
+ep32 = sft.algebra.multi_jordan_fuse(ep16, ep)
+assert sft.algebra.jordan_fingerprint(ep32.A0).nilpotent_index == 32
+print(ep32.jordan_couplings)  # ((30, 1),)
+```
+
 ---
 
 ## Quick start

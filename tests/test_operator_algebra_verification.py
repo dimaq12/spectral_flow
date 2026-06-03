@@ -9,6 +9,8 @@ CORE_CLAIMS = (
     "CORE-ALG-004",
     "CORE-HESS-006",
     "CORE-TOPO-007",
+    "CORE-JFUSE-008",
+    "CORE-MJFUSE-009",
 )
 
 

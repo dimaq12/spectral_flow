@@ -41,6 +41,14 @@ def test_fluent_operator_algebra_api_laws_and_transforms():
     assert "ALG-DIRECT-SUM-001" in {row["claim_id"] for row in report.results}
 
 
+def test_jordan_fuse_public_api_is_exported():
+    assert sft.jordan_fuse is sft.algebra.jordan_fuse
+    assert sft.multi_jordan_fuse is sft.algebra.multi_jordan_fuse
+    assert sft.jordan_fuse_chain is sft.algebra.multi_jordan_fuse
+    assert sft.jordan_fingerprint is sft.algebra.jordan_fingerprint
+    assert sft.is_single_jordan_chain is sft.algebra.is_single_jordan_chain
+
+
 def test_core_boundaries_mark_applied_packages_outside_core():
     boundaries = sft.operator_algebra.CORE_BOUNDARIES
     assert "theory-core" in boundaries

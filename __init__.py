@@ -98,6 +98,10 @@ from .invariants import all_invariants
 from .operator_algebra import (
     OperatorInvariant, OperatorSpec, OperatorCost, OperatorLaw, CostModel,
 )
+from .algebra import (
+    JordanFingerprint, jordan_fingerprint, is_single_jordan_chain,
+    jordan_fuse, multi_jordan_fuse, jordan_fuse_chain,
+)
 
 def audio(s, **kw): return AudioAdapter(s, **kw)
 def image(p, **kw): return ImageAdapter(p, **kw)
@@ -158,6 +162,8 @@ __all__ = [
     "dct_matrix", "filter_via_dct", "route_and_solve", "task", "pipe",
     "OperatorBlueprint", "from_task", "plan_operator", "construct", "synthesize",
     "OperatorInvariant", "OperatorSpec", "OperatorCost", "OperatorLaw", "CostModel",
+    "JordanFingerprint", "jordan_fingerprint", "is_single_jordan_chain",
+    "jordan_fuse", "multi_jordan_fuse", "jordan_fuse_chain",
     "InstantSpectralCodec", "all_invariants",
     "audio", "image", "graph", "text", "timeseries",
     "video", "voxel", "pointcloud", "molecular",

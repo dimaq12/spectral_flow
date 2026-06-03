@@ -305,6 +305,104 @@ def verify_core_topology_control() -> VerificationResult:
     ))
 
 
+def verify_core_jordan_fuse() -> VerificationResult:
+    """CORE-JFUSE-008: Jordan fuse turns reducible tensor EP into EP4."""
+    from . import algebra, physics
+
+    ep_a = physics.exceptional_point_2x2().family()
+    ep_b = physics.exceptional_point_2x2().family()
+    plain = algebra.tensor_sum(ep_a, ep_b)
+    fused = algebra.jordan_fuse(ep_a, ep_b)
+    plain_fp = algebra.jordan_fingerprint(plain.A0)
+    fused_fp = algebra.jordan_fingerprint(fused.A0)
+
+    radii = np.array([1e-8, 3e-8, 1e-7, 3e-7, 1e-6, 3e-6, 1e-5, 3e-5])
+    values = []
+    closure_axis = fused.M - 2
+    for radius in radii:
+        k = np.zeros(fused.M)
+        k[closure_axis] = radius
+        values.append(float(np.max(np.abs(fused.eigensystem(k)[0]))))
+    puiseux = float(np.polyfit(np.log(radii), np.log(np.asarray(values)), 1)[0])
+
+    plain_rejected = (
+        plain_fp.geometric_multiplicity == 2
+        and plain_fp.nilpotent_index == 3
+        and not plain_fp.is_single_chain
+    )
+    fused_passes = (
+        fused_fp.geometric_multiplicity == 1
+        and fused_fp.nilpotent_index == 4
+        and fused_fp.is_single_chain
+    )
+    ok = plain_rejected and fused_passes and 0.18 <= puiseux <= 0.32
+    return _finalize(VerificationResult(
+        claim_id="CORE-JFUSE-008",
+        title="Jordan fuse converts reducible tensor EP into single EP4",
+        layer="theory-core",
+        status=_status(ok),
+        evidence_level="E3",
+        metric=puiseux,
+        threshold="plain tensor_sum rejected; fused fingerprint single-chain; Puiseux exponent ~= 1/4",
+        details={
+            "plain": plain_fp.to_dict(),
+            "fused": fused_fp.to_dict(),
+            "fused_M": fused.M,
+            "closure_axis": closure_axis,
+            "puiseux_exponent": puiseux,
+            "coupling": list(fused.jordan_coupling) if isinstance(fused.jordan_coupling, tuple) else "matrix",
+        },
+    ))
+
+
+def verify_core_multi_jordan_fuse() -> VerificationResult:
+    """CORE-MJFUSE-009: multi-bridge fuse scales EP synthesis to EP32."""
+    from . import algebra, physics
+
+    ep2 = physics.exceptional_point_2x2().family()
+    ep4 = algebra.jordan_fuse(ep2, ep2, add_closure=False)
+    ep8 = algebra.multi_jordan_fuse(ep4, ep2, add_closure=False)
+    ep16 = algebra.multi_jordan_fuse(ep4, ep4, add_closure=False)
+    ep32 = algebra.multi_jordan_fuse(ep16, ep2, add_closure=False)
+    plain_16 = algebra.tensor_sum(ep4, ep4)
+
+    fp4 = algebra.jordan_fingerprint(ep4.A0)
+    fp8 = algebra.jordan_fingerprint(ep8.A0)
+    fp16 = algebra.jordan_fingerprint(ep16.A0)
+    fp32 = algebra.jordan_fingerprint(ep32.A0)
+    plain_fp = algebra.jordan_fingerprint(plain_16.A0)
+    ok = (
+        fp4.is_single_chain and fp4.nilpotent_index == 4
+        and fp8.is_single_chain and fp8.nilpotent_index == 8
+        and fp16.is_single_chain and fp16.nilpotent_index == 16
+        and fp32.is_single_chain and fp32.nilpotent_index == 32
+        and plain_fp.geometric_multiplicity == 4
+        and plain_fp.nilpotent_index == 7
+        and not plain_fp.is_single_chain
+        and len(ep16.jordan_couplings) == 3
+        and ep32.jordan_couplings == ((30, 1),)
+    )
+    return _finalize(VerificationResult(
+        claim_id="CORE-MJFUSE-009",
+        title="Multi Jordan fuse scales EP synthesis to EP32",
+        layer="theory-core",
+        status=_status(ok),
+        evidence_level="E3",
+        metric=fp32.nilpotent_index,
+        threshold="EP4, EP8, EP16, EP32 are single chains; plain EP4 tensor EP4 is reducible",
+        details={
+            "ep4": fp4.to_dict(),
+            "ep8": fp8.to_dict(),
+            "ep16": fp16.to_dict(),
+            "ep32": fp32.to_dict(),
+            "plain_ep4_tensor_ep4": plain_fp.to_dict(),
+            "ep8_couplings": [list(c) for c in ep8.jordan_couplings],
+            "ep16_couplings": [list(c) for c in ep16.jordan_couplings],
+            "ep32_couplings": [list(c) for c in ep32.jordan_couplings],
+        },
+    ))
+
+
 CORE_VERIFICATION_FUNCTIONS = (
     verify_core_hf_kernel,
     verify_core_perturbation_order,
@@ -313,6 +411,8 @@ CORE_VERIFICATION_FUNCTIONS = (
     verify_core_negative_controls,
     verify_core_hessian_consistency,
     verify_core_topology_control,
+    verify_core_jordan_fuse,
+    verify_core_multi_jordan_fuse,
 )
 
 
