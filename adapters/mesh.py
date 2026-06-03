@@ -1,5 +1,5 @@
 from .base import BaseAdapter
-from ..core import OperatorFamily
+from ..core import OperatorFamily, edge_laplacian_basis
 import numpy as np
 
 
@@ -75,12 +75,4 @@ class MeshAdapter(BaseAdapter):
         edges = list(zip(row.tolist(), col.tolist()))
         self.n_edges = len(edges)
 
-        M = len(edges)
-        basis_arr = np.zeros((M, Nv, Nv))
-        for k, (u, v) in enumerate(edges):
-            basis_arr[k, u, u] = 1.0
-            basis_arr[k, v, v] = 1.0
-            basis_arr[k, u, v] = -1.0
-            basis_arr[k, v, u] = -1.0
-
-        self._family = OperatorFamily(L, list(basis_arr) if M > 0 else [])
+        self._family = OperatorFamily(L, edge_laplacian_basis(Nv, edges))

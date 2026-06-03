@@ -6,6 +6,7 @@ import numpy as np
 import sft
 
 OUT = os.path.join(os.path.dirname(__file__), "reports", "pde_spectroscopy.md")
+os.makedirs(os.path.dirname(OUT), exist_ok=True)
 
 # Simulate defect measurements from a fractional heat operator
 rng = np.random.default_rng(0)

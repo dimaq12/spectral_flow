@@ -12,14 +12,15 @@ sft.homotopy — Homotopy continuation, regularised pinv, trust-region.
 """
 import numpy as np
 from scipy import linalg
-from .core import OperatorFamily
+from .core import OperatorFamily, InverseResult
 
 
 def regularised_pinv(W: np.ndarray, reg: float = 1e-6) -> np.ndarray:
     """Tikhonov: W⁺_reg = (W^T·W + reg·I)^(−1)·W^T.  Stable for ill-conditioned W."""
     N, M = W.shape
-    return linalg.solve(W.T @ W + reg * np.eye(min(N, M)),
-                        W.T if M <= N else (W @ W.T + reg * np.eye(N)).T @ W, assume_a='pos')
+    if M <= N:
+        return linalg.solve(W.T @ W + reg * np.eye(M), W.T, assume_a='pos')
+    return W.T @ linalg.solve(W @ W.T + reg * np.eye(N), np.eye(N), assume_a='pos')
 
 
 def trust_region_corrector(x: np.ndarray, target: np.ndarray,
@@ -38,13 +39,16 @@ def track_homotopy(target_lam: np.ndarray, n_steps: int = 20,
                    easy_lam: np.ndarray | None = None, adaptive: bool = True):
     """H_τ path tracking: λ(τ) = (1−τ)λ_easy + τ·λ_target.  Uses SFT prediction + correction."""
     if family is None: raise ValueError("family required")
-    easy = easy_lam or np.ones(family.N)
+    easy = np.ones(family.N) if easy_lam is None else np.asarray(easy_lam, dtype=np.float64).ravel()
+    target_lam = family._check_target(target_lam)
     k = np.zeros(family.M); step_size = 1.0 / n_steps
     tau = np.linspace(0, 1, n_steps)
+    n_refresh = 0
     for i, t in enumerate(tau):
         if i == 0: continue
         target_t = (1 - t) * easy + t * target_lam
-        family.set_reference(family.build(k))
+        family.set_reference(family.build(k), k0=k)
+        n_refresh += 1
         residual = target_t - family.spectrum(k)
         n_r = min(len(residual), family.W.shape[1], family.W.shape[0])
         Wp = regularised_pinv(family.W, 1e-4)
@@ -58,4 +62,6 @@ def track_homotopy(target_lam: np.ndarray, n_steps: int = 20,
             step_size = min(1.0 / n_steps, step_size * min(2.0, max(0.1, 0.1 / (err_prev + 1e-10))))
     lam_final = family.spectrum(k)
     err = float(np.max(np.abs(lam_final[:len(target_lam)] - target_lam)))
-    return k, err, err < 0.05
+    return InverseResult(k, err, err < 0.05, steps=n_steps,
+                         n_refresh=n_refresh,
+                         condition_number=family.condition_number())

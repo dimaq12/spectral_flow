@@ -6,6 +6,7 @@ import numpy as np
 import sft
 
 OUT = os.path.join(os.path.dirname(__file__), "reports", "graph_sorting.md")
+os.makedirs(os.path.dirname(OUT), exist_ok=True)
 
 dists = {
     "Uniform(0,1)": np.random.default_rng(0).uniform(0, 1, 200_000),

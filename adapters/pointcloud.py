@@ -1,5 +1,5 @@
 from .base import BaseAdapter
-from ..core import OperatorFamily
+from ..core import OperatorFamily, edge_laplacian_basis
 import numpy as np
 from scipy.spatial import cKDTree
 
@@ -73,17 +73,7 @@ class PointCloudAdapter(BaseAdapter):
         else:
             max_params = M
 
-        basis_arr = np.zeros((max_params, N, N))
-        edge_arr = np.array(edges, dtype=int) if max_params > 0 else np.empty((0, 2), dtype=int)
-        if max_params > 0:
-            u_idx = edge_arr[:, 0]
-            v_idx = edge_arr[:, 1]
-            basis_arr[np.arange(max_params), u_idx, u_idx] = 1.0
-            basis_arr[np.arange(max_params), v_idx, v_idx] = 1.0
-            basis_arr[np.arange(max_params), u_idx, v_idx] = -1.0
-            basis_arr[np.arange(max_params), v_idx, u_idx] = -1.0
-
         W_dense = W_sp.toarray()
         D = np.diag(np.asarray(W_sp.sum(axis=1)).ravel())
         A0 = D - W_dense
-        self._family = OperatorFamily(A0, list(basis_arr) if max_params > 0 else [])
+        self._family = OperatorFamily(A0, edge_laplacian_basis(N, edges))

@@ -27,6 +27,8 @@ sft.tasks — Task classification, CDF sort, DCT filtering, spectral clustering.
 """
 from __future__ import annotations
 from enum import Enum, auto
+from functools import lru_cache
+import warnings
 import numpy as np
 from scipy import linalg
 
@@ -64,12 +66,20 @@ def classify_task(problem_string: str) -> OperatorGenus:
     return OperatorGenus.PARAMETRIC
 
 
-def dct_matrix(n: int) -> np.ndarray:
+@lru_cache(maxsize=32)
+def _dct_matrix_cached(n: int) -> np.ndarray:
     """DCT-II orthonormal basis: C @ x gives DCT coefficients, C^T @ coeffs = signal.  C·C^T = I."""
     k = np.arange(n)
     C = np.cos(np.pi / n * (k[:, None] + 0.5) * k[None, :])
     C[:, 0] *= 1.0 / np.sqrt(2); C *= np.sqrt(2.0 / n)
     return C
+
+
+def dct_matrix(n: int) -> np.ndarray:
+    """DCT-II orthonormal basis: returns a copy safe for caller mutation."""
+    if n <= 0:
+        raise ValueError(f"n must be positive, got {n}")
+    return _dct_matrix_cached(int(n)).copy()
 
 
 def filter_via_dct(signal: np.ndarray, keep_low: int | None = None,
@@ -136,7 +146,9 @@ def diagnose_mismatch(problem: str, data: np.ndarray) -> dict:
     try:
         fam = synthesize(problem, data); pred = fam.predict(np.zeros(fam.M))
         err = float(np.max(np.abs(pred - fam.lam0)))
-    except Exception: err = 0.0
+    except Exception as exc:
+        warnings.warn(f"diagnose_mismatch could not synthesize operator: {exc}", RuntimeWarning, stacklevel=2)
+        err = 0.0
     return {"task_solved": genus.name, "genus": genus, "spectrum_error": err, "phantom_detected": err > 0.1}
 
 

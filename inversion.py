@@ -18,41 +18,60 @@ sft.inversion — Inversion strategies: bottleneck, fixed-point, monodromy.
 """
 import numpy as np
 from scipy import linalg
-from .core import OperatorFamily
+from .core import OperatorFamily, InverseResult
 
 
 def bottleneck_inverse(family: OperatorFamily, target: np.ndarray,
-                       bottleneck_dim: int, steps: int = 30, alpha: float = 0.5) -> np.ndarray:
+                       bottleneck_dim: int, steps: int = 30, alpha: float = 0.5,
+                       return_result: bool = False) -> np.ndarray | InverseResult:
     """W = UΣV → A=U√Σ, B=√ΣV → k += α·B⁺·A⁺·residual."""
+    target = family._check_target(target)
     W = family.W; U, s, Vt = linalg.svd(W, full_matrices=False)
     b = min(bottleneck_dim, len(s))
     A = U[:, :b] * np.sqrt(s[:b])[None, :]
     B = np.sqrt(s[:b])[:, None] * Vt[:b, :]
     Ap, Bp = linalg.pinv(A), linalg.pinv(B)
-    k = np.zeros(family.M); family.set_reference(family.build(k))
+    k = np.zeros(family.M); family.set_reference(family.build(k), k0=k)
+    n_refresh = 1
     for _ in range(steps):
         residual = target - family.spectrum(k); n_res = min(len(residual), family.M)
         dk = alpha * (Bp @ (Ap[:, :n_res] @ residual[:n_res]))
-        k += dk; family.set_reference(family.build(k))
+        k += dk; family.set_reference(family.build(k), k0=k); n_refresh += 1
+    err = float(np.max(np.abs(family.spectrum(k) - target)))
+    if return_result:
+        return InverseResult(k, err, err < family.convergence_tol,
+                             steps=steps, n_refresh=n_refresh,
+                             condition_number=family.condition_number())
     return k
 
 
 def fixed_point_inverse(family: OperatorFamily, target: np.ndarray,
                         linear_basis_indices: list[int],
                         outer_steps: int = 10, inner_steps: int = 5,
-                        alpha: float = 0.3) -> np.ndarray:
+                        alpha: float = 0.3,
+                        return_result: bool = False) -> np.ndarray | InverseResult:
     """Freeze nonlinear params → solve linear → update.  Repeat outer_steps×inner_steps."""
+    target = family._check_target(target)
     k = np.zeros(family.M)
     lmask = np.isin(np.arange(family.M), linear_basis_indices).astype(float)
+    n_refresh = 0
     for _ in range(outer_steps):
-        family.set_reference(family.build(k))
+        family.set_reference(family.build(k), k0=k)
+        n_refresh += 1
         for _ in range(inner_steps):
             residual = target - family.spectrum(k)
             n_r = min(len(residual), family.W_pinv.shape[1])
             dk = alpha * (family.W_pinv[:, :n_r] @ residual[:n_r])
             if len(dk) > family.M: dk = dk[:family.M]
             k += dk * lmask
-            family.set_reference(family.build(k))
+            family.set_reference(family.build(k), k0=k)
+            n_refresh += 1
+    err = float(np.max(np.abs(family.spectrum(k) - target)))
+    if return_result:
+        return InverseResult(k, err, err < family.convergence_tol,
+                             steps=outer_steps * inner_steps,
+                             n_refresh=n_refresh,
+                             condition_number=family.condition_number())
     return k
 
 

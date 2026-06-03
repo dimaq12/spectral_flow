@@ -17,7 +17,7 @@
 
 ## What
 
-**Spectral Flow Transform** is the derivative of the spectrum with respect to parameters.
+**Spectral Flow Transform** is a tiny idea with a big payoff: treat the spectrum as a differentiable object.
 
 Given a linear operator family A(k) = A₀ + Σ kⱼ·Bⱼ, the kernel W captures the entire first-order spectral response:
 
@@ -28,7 +28,14 @@ Given a linear operator family A(k) = A₀ + Σ kⱼ·Bⱼ, the kernel W capture
 | Spectral topology requires custom code | Monodromy, Berry phase, exceptional points — built in |
 | Graph Laplacian → spectrum only | spectrum → edge weights via W⁺ — **inverse graph design** |
 
-**W is a universal Jacobian.** It compresses the spectral response of any linear operator family into a single matrix. Everything else — prediction, inverse design, topology, Hessian, invariants, domain adapters — follows from W.
+**W is the spectral Jacobian.** It compresses the response of an operator family into one matrix. Prediction, inverse design, topology, Hessian, invariants, codecs, graph tools, and domain adapters all build from that same object.
+
+### Why it feels fast
+
+- Build once: diagonalize one reference operator and compute `W`.
+- Query cheaply: use `W @ dk` for spectral prediction in microseconds.
+- Navigate adaptively: refresh the reference only when the local model gets stale.
+- Keep structure: graph, diagonal, and edge-Laplacian families avoid huge dense basis stacks.
 
 ---
 
@@ -69,45 +76,66 @@ pip install spectral-flow
 import numpy as np
 import sft
 
-# ── 1. Build a random 100×100 operator with 30 tunable parameters ──
-fam = sft.families.random(N=100, M=30)
+# 1. Build a 100x100 operator with 30 tunable directions.
+fam = sft.families.random(N=100, M=30, seed=42)
 
-fam.W                    # (100,30) — spectral flow kernel
-fam.complexity           # rank(W)/N = 0.30 — low structural complexity
-fam.condition_number()   # κ(W) = 12.9 — well-conditioned
+print(fam.W.shape)            # (100, 30)
+print(fam.complexity)         # rank(W) / N
+print(fam.condition_number()) # conditioning of inverse design
 
-# ── 2. Predict how the spectrum shifts under a parameter change ──
-dk = 0.01 * np.random.randn(30)
-lam_pred = fam.predict(dk)          # 1st-order, O(N·M)
-lam_exact = fam.spectrum(dk)        # exact, O(N³)
-# max|λ_pred − λ_exact| < 5e-3 for ||dk|| = 0.01
+# 2. Predict a spectral shift cheaply.
+rng = np.random.default_rng(0)
+dk = 0.01 * rng.standard_normal(fam.M)
+lam_pred = fam.predict(dk)      # first-order, O(N*M)
+lam_exact = fam.spectrum(dk)    # exact eigensolve, O(N^3)
+print(np.max(np.abs(lam_pred - lam_exact)))
 
-# ── 3. Inverse design: find parameters that produce a target spectrum ──
+# 3. Inverse design: find parameters for a target spectrum.
 target = np.sort(fam.lam0 + np.linspace(-0.15, 0.15, 100))
-k, err, converged = fam.inverse(target, steps=20, alpha=0.3)
-# converged → True, max|λ(k) − target| < 1e-2
+result = fam.inverse(target, steps=20, alpha=0.3)
+k, err, converged = result      # still tuple-unpackable
+print(result.error, result.n_refresh, result.condition_number)
 
-# ── 4. Algebra: combine operator families ──
-fam_ab = sft.algebra.direct_sum(fam_a, fam_b)      # A ⊕ B
-fam_comp = sft.algebra.compose_linear(outer, C)     # A ∘ B
-fam_kron = sft.algebra.tensor_sum(fam_a, fam_b)     # A ⊗ B
-stats = sft.algebra.expectation(fam, mu=np.zeros(30), sigma=0.1)
+# 4. Topology on the classic 2x2 avoided crossing.
+fam2 = sft.families.avoided_crossing_2x2(Delta=0.3)
+loop = [
+    np.array([0.4 * np.cos(t), 0.4 * np.sin(t)])
+    for t in np.linspace(0, 2 * np.pi, 60)
+]
+tracked, swaps = sft.topology.monodromy(fam2, loop)
+holonomy = sft.topology.berry_holonomy(fam2, loop, level=1)
 
-# ── 5. Topology: eigenvalue braiding and Berry phase ──
-loop = [np.array([0.4*cos(t), 0.4*sin(t)]) for t in np.linspace(0, 2π, 60)]
-tracked, swaps = sft.topology.monodromy(fam, loop)
-holonomy = sft.topology.berry_holonomy(fam, loop, level=0)
-# holonomy = −1 → Möbius topology, eigenvector flips sign over 2π
-
-# ── 6. Hessian: 2nd-order spectral curvature ──
-H = sft.hessian.analytic(fam)         # ∂²λ/∂k² tensor
-sparsity = sft.hessian.hessian_sparsity(H)
-curvature = sft.hessian.spectral_curvature(fam, direction=d)
-
-# ── 7. Invariants: 5 global spectral fingerprints ──
+# 5. Second-order curvature and global fingerprints.
+H = sft.hessian.hessian_analytic(fam2)
 fp = sft.invariants.all_invariants(fam)
-# {svd_kurtosis, hessian_sparsity, poisson_preimage, w_coherence, zeta_fingerprint}
 ```
+
+### The API in one screen
+
+```python
+sft.families.random(N, M)          # generic operator family
+sft.families.graph_laplacian(adj)  # structured graph family
+
+sft.audio(signal)                  # raw data -> adapter -> OperatorFamily
+sft.image(pixels)
+sft.graph(adjacency)
+sft.text(corpus)
+
+sft.solve(fam, target_spectrum)    # inverse design
+sft.sort(values)                   # CDF/ORDER helper
+sft.filter(signal, keep_low=8)     # DCT helper
+sft.cluster_data(points)           # spectral clustering helper
+```
+
+### Pick the right entry point
+
+| You have... | Use... | You get... |
+|-------------|--------|------------|
+| A matrix family `A0 + sum(k_j B_j)` | `sft.OperatorFamily` | Full spectral kernel control |
+| A graph adjacency matrix | `sft.graph(adjacency)` | Edge-weight spectral response without dense edge stacks |
+| Raw domain data | `sft.audio`, `sft.image`, `sft.text`, ... | A ready-to-query adapter |
+| A task string and data | `sft.from_task(...)` or `sft.solve(...)` | High-level routing into SFT |
+| A target spectrum | `fam.inverse(target)` | Parameters plus diagnostics |
 
 ---
 
@@ -117,8 +145,8 @@ fp = sft.invariants.all_invariants(fam)
 
 ```python
 # ── Audio ──
-sound = sft.audio(signal, sr=44100, n_bands=16)
-sound.kernel         # (16,16) — per-band EQ → spectrum response
+sound = sft.audio(signal, sample_rate=44100, n_bands=16)
+sound.kernel         # (N,16) — per-band EQ → spectrum response
 sound.predict(delta) # how EQ changes affect the spectral signature
 
 # ── Image ──
@@ -141,14 +169,14 @@ ts.kernel            # singular spectrum kernel (SSA)
 
 # ── 3D / Point clouds / Molecular / Financial / Tabular / Mesh ──
 vol = sft.voxel(mri_volume)           # 3D medical imaging
-pc  = sft.pointcloud(points, k=15)    # 3D point cloud → kNN Laplacian
-mol = sft.molecular(positions, types, bonds)  # molecule → Coulomb operator
-fin = sft.financial(returns, sectors, names)  # multi-asset → correlation operator
-tab = sft.tabular(data, feature_groups)       # tabular → feature covariance
-m   = sft.mesh(vertices, faces)               # 3D mesh → Laplace-Beltrami
+pc  = sft.pointcloud(points, k=15)                         # point cloud -> kNN Laplacian
+mol = sft.molecular(positions, atom_types=types, bonds=bonds)
+fin = sft.financial(returns, sectors=sectors, asset_names=names)
+tab = sft.tabular(data, feature_groups=feature_groups)
+m   = sft.mesh(vertices, faces)                            # mesh -> Laplace-Beltrami
 ```
 
-**Every adapter exposes the same interface:** `.kernel`, `.predict()`, `.inverse()`, `.rank`, `.complexity`, `.spectrum`.
+**Every adapter exposes the same interface:** `.kernel`, `.predict()`, `.inverse()`, `.rank`, `.complexity`, `.reference_spectrum`. The old `.spectrum` alias still works.
 
 ---
 
@@ -163,6 +191,13 @@ sft.classify_task("cluster by similarity") # → OperatorGenus.GRAPH
 fam = sft.from_task("sort", data)          # → OperatorFamily (MONO, diagonal basis)
 fam = sft.from_task("filter", signal)      # → OperatorFamily (QUAD, toeplitz basis)
 fam = sft.from_task("compress", signal)    # → OperatorFamily (COMPRESS, toeplitz basis)
+
+# Simple facade helpers:
+sorted_arr = sft.sort(arr)
+filtered = sft.filter(signal, keep_low=8)
+labels = sft.cluster_data(points)
+result = sft.solve(fam, target_spectrum)   # InverseResult; still unpackable
+k, err, ok = result
 ```
 
 ---
@@ -170,12 +205,14 @@ fam = sft.from_task("compress", signal)    # → OperatorFamily (COMPRESS, toepl
 ## Graph analysis — O(1) queries after precompute
 
 ```python
-edges = sft.basis.path_graph(1000)           # 1D chain
-# or: sft.basis.grid_graph_2d(30, 30)        # 2D grid
-# or: sft.basis.random_graph(500, 0.05)      # Erdős–Rényi
-# or: sft.basis.small_world_graph(200, 6, 0.1)  # Watts–Strogatz
+adj = sft.graph_gen.path_graph(1000)             # 1D chain adjacency
+# or: sft.graph_gen.grid_graph_2d(30, 30)        # 2D grid adjacency
+# or: sft.graph_gen.random_graph(500, 0.05)      # Erdos-Renyi adjacency
+# or: sft.graph_gen.small_world_graph(200, 6, 0.1)
 
-gop = sft.graphop.GraphOperator(edges)       # O(V+E) build — Tarjan + Batagelj-Zaveršnik
+row, col = np.triu(adj, 1).nonzero()
+edges = list(zip(row.tolist(), col.tolist()))
+gop = sft.graphop.GraphOperator(edges)       # O(V+E) build - Tarjan + k-core
 
 # All queries O(1):
 gop.is_bridge(0, 1)          # is this edge a bridge?
@@ -245,8 +282,8 @@ dk_hat = codec.decode(y)      # dk ≈ W⁺·y — parameter reconstruction
 err = codec.roundtrip_error(dk)
 
 # DCT codec (for signals):
-signal = np.sin(np.linspace(0, 10π, 256))
-reconstructed = sft.build_dct_codec(signal, keep_frac=0.5)
+signal = np.sin(np.linspace(0, 10 * np.pi, 256))
+reconstructed = sft.compress.dct_codec(signal, keep_frac=0.5)
 ```
 
 ---
@@ -254,16 +291,20 @@ reconstructed = sft.build_dct_codec(signal, keep_frac=0.5)
 ## Homotopy continuation
 
 ```python
+target_spectrum = np.sort(fam.lam0 + np.linspace(-0.05, 0.05, fam.N))
+
 # Track spectral flow from an easy inverse to a hard target:
 k, err, converged = sft.homotopy.track_homotopy(
     target_spectrum, n_steps=20, family=fam, adaptive=True
 )
 
 # Tikhonov-regularized pseudoinverse (stable even for ill-conditioned W):
-W_reg = sft.homotopy.regularised_pinv(W, reg=1e-6)
+W_reg = sft.homotopy.regularised_pinv(fam.W, reg=1e-6)
 
 # Trust-region corrector step:
-dk = sft.homotopy.trust_region_corrector(x, target, W, radius=1.0)
+dk = sft.homotopy.trust_region_corrector(
+    np.zeros(fam.M), target_spectrum - fam.lam0, fam.W, radius=1.0
+)
 ```
 
 ---
@@ -271,14 +312,20 @@ dk = sft.homotopy.trust_region_corrector(x, target, W, radius=1.0)
 ## Inversion strategies
 
 ```python
+target = np.sort(fam.lam0 + np.linspace(-0.05, 0.05, fam.N))
+
 # Bottleneck — factor W ≈ A·diag·B, invert through low-dim manifold:
 k = sft.inversion.bottleneck_inverse(fam, target, bottleneck_dim=5)
 
 # Fixed-point — split into linear/nonlinear params, freeze, iterate:
-k = sft.inversion.fixed_point_inverse(fam, target, linear_idx=[0, 1])
+k = sft.inversion.fixed_point_inverse(fam, target, linear_basis_indices=[0, 1])
 
 # Monodromy — 2π walk around complex branch cut:
-k = sft.inversion.monodromy_inverse(fam, n_pts_circle=60, radius=1.0)
+def target_func(k):
+    z = k[0] + 1j * k[1]
+    return np.linalg.eigvals(np.array([[0, 1], [z, 0]], dtype=complex))
+
+lams, drift = sft.inversion.monodromy_inverse(target_func, n_pts_circle=60, radius=1.0)
 ```
 
 ---
@@ -375,23 +422,27 @@ dim(ker(W)) = M − rank(W) — the number of directions in parameter space that
 
 ## Demos — real metrics, every one runnable
 
-Each demo is a Python script in [`examples/`](examples/) that generates a full report in [`examples/reports/`](examples/reports/).
-Run them all: `python3 examples/demo_*.py`
+Each demo is a Python script in [`examples/`](examples/). See [`examples/README.md`](examples/README.md) for the short tour. Report demos generate markdown in [`examples/reports/`](examples/reports/).
+Run them from the repository root:
+
+```bash
+for f in sft/examples/demo_*.py; do python3 "$f"; done
+```
 
 | Demo | What it shows | Key result | Full report |
 |------|--------------|------------|-------------|
-| **Scale benchmark** | N=50..500, build/predict/inverse timing | Inverse 500×500 in 1.6s | [`md`](examples/reports/benchmark_scale.md) |
-| **Adapter load test** | All 12 adapters in one run | Max build 1.7s across all domains | [`md`](examples/reports/benchmark_adapters.md) |
-| **Cosmic dynamics** | Gravitational N-body Jacobian | complexity=0.20, build 51ms | [`md`](examples/reports/cosmic_dynamics.md) |
+| **Scale benchmark** | N=50..500, build/predict/inverse timing | N=500 predict in 85us; graph avoids ~306MB dense basis | [`md`](examples/reports/benchmark_scale.md) |
+| **Adapter load test** | All 12 adapters in one run | Max build 461ms across all domains | [`md`](examples/reports/benchmark_adapters.md) |
+| **Cosmic dynamics** | Gravitational N-body Jacobian | complexity=0.20, build 20ms | [`md`](examples/reports/cosmic_dynamics.md) |
 | **PDE spectroscopy** | Defect α-recovery across distributions | Normal α=1.22, Cauchy α=1.42 | [`md`](examples/reports/pde_spectroscopy.md) |
 | **Graph sorting** | CDF sort 200K × 3 distributions | **Zero error** vs numpy.sort | [`md`](examples/reports/graph_sorting.md) |
 | **Electrodynamics** | Maxwell 4/3 mass → rank deficit | ratio=1.333, rank(W_EM)=1 | [`md`](examples/reports/electrodynamics.md) |
-| **Logical embeddings** | AND/NOT/IMPLY typed edges | 100 nodes × 32-d, build 1ms | [`md`](examples/reports/logical_embeddings.md) |
-| **Graph operator** | O(1) bridge/articulation queries | V=5000, build 61ms | [`md`](examples/reports/graph_operator.md) |
+| **Logical embeddings** | AND/NOT/IMPLY typed edges | 100 nodes x 32-d, build 8ms | [`md`](examples/reports/logical_embeddings.md) |
+| **Graph operator** | O(1) bridge/articulation queries | V=5000, build 67ms | [`md`](examples/reports/graph_operator.md) |
 | **Spectral codec** | W·dk encode, W⁺·y decode | Roundtrip **1.0e-15** | [`md`](examples/reports/spectral_codec.md) |
-| **Spectral topology** | Berry holonomy + monodromy | Holonomy = **−1**, 783ms | [`md`](examples/reports/spectral_topology.md) |
+| **Spectral topology** | Berry holonomy + monodromy | Holonomy = **-1**, monodromy 3ms | [`md`](examples/reports/spectral_topology.md) |
 
-**One kernel. 10 demos. All running. Machine zero. Built on W.**
+**One kernel. 10 demos. All runnable. Built on W.**
 
 ---
 

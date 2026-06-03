@@ -17,7 +17,7 @@ Eigenvectors may flip sign. The Berry holonomy reveals the topological charge.
 |--------|-------|
 | Berry holonomy | **-1** |
 | Interpretation | Möbius topology — eigenvector flips sign over 2π |
-| Monodromy time | **783ms** for 60 points |
+| Monodromy time | **3ms** for 60 points |
 | Eigenvalues swapped (Hermitian) | No — levels repel, never cross |
 | Eigenvalues swapped (Non-Hermitian) | **Yes** — λ swap after 2π loop |
 | λ(φ=0) | (0.707+0.000j, -0.707+0.000j) |
@@ -41,6 +41,9 @@ Eigenvectors may flip sign. The Berry holonomy reveals the topological charge.
 ```python
 import numpy as np, sft
 fam = sft.families.avoided_crossing_2x2(0.3)
-loop = [np.array([0.4*np.cos(t), 0.4*np.sin(t)]) for t in np.linspace(0, 2π, 60)]
+loop = [
+    np.array([0.4*np.cos(t), 0.4*np.sin(t)])
+    for t in np.linspace(0, 2*np.pi, 60)
+]
 hol = sft.topology.berry_holonomy(fam, loop, level=1)  # → -1
 ```

@@ -6,6 +6,7 @@ import numpy as np
 import sft
 
 OUT = os.path.join(os.path.dirname(__file__), "reports", "logical_embeddings.md")
+os.makedirs(os.path.dirname(OUT), exist_ok=True)
 
 # Simulate Shakespeare-style co-occurrence + logic graph
 rng = np.random.default_rng(42)

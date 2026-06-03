@@ -1,5 +1,5 @@
 from .base import BaseAdapter
-from ..core import OperatorFamily
+from ..core import OperatorFamily, edge_laplacian_basis
 import numpy as np
 
 
@@ -57,12 +57,4 @@ class MolecularAdapter(BaseAdapter):
 
         A0[np.diag_indices(N)] = -np.sum(A0, axis=1)
 
-        M = len(self.bonds)
-        basis_arr = np.zeros((M, N, N))
-        for k, (u, v) in enumerate(self.bonds):
-            basis_arr[k, u, u] = 1.0
-            basis_arr[k, v, v] = 1.0
-            basis_arr[k, u, v] = -1.0
-            basis_arr[k, v, u] = -1.0
-
-        self._family = OperatorFamily(A0, list(basis_arr) if M > 0 else [])
+        self._family = OperatorFamily(A0, edge_laplacian_basis(N, self.bonds))

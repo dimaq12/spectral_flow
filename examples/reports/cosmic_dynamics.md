@@ -16,7 +16,7 @@ One diagonalization replaces thousands of N-body simulations.
 
 | Metric | Value |
 |--------|-------|
-| Build time | **50.6ms** |
+| Build time | **20.3ms** |
 | Kernel W shape | 100 × 20 |
 | rank(W) | **20** |
 | complexity = rank/N | **0.200** |

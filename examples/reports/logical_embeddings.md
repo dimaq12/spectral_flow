@@ -18,7 +18,7 @@ No training. No SGD. Deterministic.
 
 | Metric | Value |
 |--------|-------|
-| Build time | **1ms** |
+| Build time | **8ms** |
 | Embedding | 100 nodes × 32-d spectral space |
 | Nearest neighbor to node 0 | node 99 at distance **0.3281** |
 

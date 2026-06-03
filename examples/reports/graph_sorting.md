@@ -16,8 +16,8 @@ Precompute once, query rank in O(log n), sort with **zero mismatches vs numpy.so
 
 | Distribution | Size | Time | Error vs np.sort |
 |-------------|------|------|:---:|
-| Uniform(0,1) | N=200K | **55ms** | ✓ ZERO |
-| Normal(0,1) | N=200K | **42ms** | ✓ ZERO |
+| Uniform(0,1) | N=200K | **51ms** | ✓ ZERO |
+| Normal(0,1) | N=200K | **44ms** | ✓ ZERO |
 | Cauchy(0,1) | N=200K | **23ms** | ✓ ZERO |
 
 ### Precomputed CDF — rank queries

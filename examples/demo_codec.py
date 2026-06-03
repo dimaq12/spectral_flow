@@ -7,6 +7,7 @@ import sft
 from sft.codec import InstantSpectralCodec
 
 OUT = os.path.join(os.path.dirname(__file__), "reports", "spectral_codec.md")
+os.makedirs(os.path.dirname(OUT), exist_ok=True)
 
 fam = sft.families.random(64, 16, seed=42)
 codec = InstantSpectralCodec(fam)

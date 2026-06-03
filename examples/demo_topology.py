@@ -6,6 +6,7 @@ import numpy as np
 import sft
 
 OUT = os.path.join(os.path.dirname(__file__), "reports", "spectral_topology.md")
+os.makedirs(os.path.dirname(OUT), exist_ok=True)
 
 fam = sft.families.avoided_crossing_2x2(Delta=0.3)
 n_pts = 60
@@ -70,7 +71,10 @@ Eigenvectors may flip sign. The Berry holonomy reveals the topological charge.
 ```python
 import numpy as np, sft
 fam = sft.families.avoided_crossing_2x2(0.3)
-loop = [np.array([0.4*np.cos(t), 0.4*np.sin(t)]) for t in np.linspace(0, 2π, 60)]
+loop = [
+    np.array([0.4*np.cos(t), 0.4*np.sin(t)])
+    for t in np.linspace(0, 2*np.pi, 60)
+]
 hol = sft.topology.berry_holonomy(fam, loop, level=1)  # → {hol:+d}
 ```
 """

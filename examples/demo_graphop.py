@@ -6,6 +6,7 @@ import numpy as np
 import sft
 
 OUT = os.path.join(os.path.dirname(__file__), "reports", "graph_operator.md")
+os.makedirs(os.path.dirname(OUT), exist_ok=True)
 
 rng = np.random.default_rng(42)
 V, E_target = 5000, 25000

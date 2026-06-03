@@ -52,9 +52,13 @@ def monodromy(family: OperatorFamily,
         idx = np.argsort(lam)
         return lam[idx], v[:, idx]
 
+    use_parallel = (N >= 64 and n_steps >= 32) or n_steps >= 512
     try:
-        from joblib import Parallel, delayed
-        results = Parallel(n_jobs=-1)(delayed(_step)(kvec) for kvec in loop)
+        if use_parallel:
+            from joblib import Parallel, delayed
+            results = Parallel(n_jobs=-1)(delayed(_step)(kvec) for kvec in loop)
+        else:
+            results = [_step(kvec) for kvec in loop]
     except (ImportError, ModuleNotFoundError):
         results = [_step(kvec) for kvec in loop]
 

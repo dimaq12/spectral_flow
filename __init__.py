@@ -56,7 +56,7 @@ sft — Spectral Flow Transform v0.1.0
     print(fam.complexity)
 
     # Domain adapters — killer feature
-    sound = sft.audio(signal, sr=44100)
+    sound = sft.audio(signal, sample_rate=44100)
     pic   = sft.image(pixels, patch_size=8)
     net   = sft.graph(adjacency)
 
@@ -75,7 +75,7 @@ sft — Spectral Flow Transform v0.1.0
 """
 __version__ = "0.1.2"
 
-from .core import OperatorFamily, nullspace
+from .core import OperatorFamily, InverseResult, nullspace, graph_response_kernel
 from . import algebra, topology, hessian, families
 from . import tasks, constructor, homotopy, graphop
 from . import compress, streaming, order, embed
@@ -91,8 +91,10 @@ from .graphop import GraphOperator
 from .embed import GraphEmbedder, LogicalGraphEmbedder
 from .order import UniversalRankOperator, DefectPrecomputedCDF, rank_defect_analysis, carleman_cdf
 from .streaming import StreamingCDF, StreamingOrderOnline
-from .tasks import OperatorGenus, classify_task, cdf_rank_sort, dct_matrix, filter_via_dct
+from .tasks import OperatorGenus, classify_task, cdf_rank_sort, dct_matrix, filter_via_dct, route_and_solve
 from .constructor import from_task, plan_operator, construct, synthesize
+from .codec import InstantSpectralCodec
+from .invariants import all_invariants
 
 def audio(s, **kw): return AudioAdapter(s, **kw)
 def image(p, **kw): return ImageAdapter(p, **kw)
@@ -102,13 +104,42 @@ def timeseries(s, **kw): return TimeseriesAdapter(s, **kw)
 def video(f, **kw): return VideoAdapter(f, **kw)
 def voxel(v, **kw): return VoxelAdapter(v, **kw)
 def pointcloud(p, **kw): return PointCloudAdapter(p, **kw)
-def molecular(pos, at, bo, **kw): return MolecularAdapter(pos, at, bo, **kw)
+def molecular(pos, at=None, bo=None, **kw):
+    if "atom_types" in kw:
+        if at is not None:
+            raise TypeError("Use either positional atom types or atom_types=, not both")
+        at = kw.pop("atom_types")
+    if "bonds" in kw:
+        if bo is not None:
+            raise TypeError("Use either positional bonds or bonds=, not both")
+        bo = kw.pop("bonds")
+    if at is None or bo is None:
+        raise TypeError("molecular() requires atom types and bonds")
+    return MolecularAdapter(pos, at, bo, **kw)
 def financial(r, **kw): return FinancialAdapter(r, **kw)
 def tabular(d, **kw): return TabularAdapter(d, **kw)
 def mesh(v, f, **kw): return MeshAdapter(v, f, **kw)
 
+def solve(problem, data=None, **kw):
+    """High-level convenience dispatcher.
+
+    If problem is an OperatorFamily, solve an inverse spectral target via
+    ``problem.inverse(data, **kw)``. Otherwise dispatch natural-language tasks.
+    """
+    if isinstance(problem, OperatorFamily):
+        if data is None:
+            raise TypeError("solve(family, target_spectrum, **kw) requires a target spectrum")
+        return problem.inverse(data, **kw)
+    if data is None:
+        raise TypeError("solve(problem, data) requires data for task routing")
+    return route_and_solve(problem, data)
+
+def sort(data, **kw): return cdf_rank_sort(data, **kw)
+def filter(data, **kw): return filter_via_dct(data, **kw)
+def cluster_data(data, **kw): return tasks.cluster_via_laplacian(data, **kw)
+
 __all__ = [
-    "OperatorFamily", "nullspace",
+    "OperatorFamily", "InverseResult", "nullspace", "graph_response_kernel",
     "algebra", "topology", "hessian", "families",
     "tasks", "constructor", "homotopy", "graphop",
     "compress", "streaming", "order", "embed",
@@ -121,9 +152,11 @@ __all__ = [
     "UniversalRankOperator", "DefectPrecomputedCDF", "rank_defect_analysis",
     "carleman_cdf", "StreamingCDF", "StreamingOrderOnline",
     "OperatorGenus", "classify_task", "cdf_rank_sort",
-    "dct_matrix", "filter_via_dct",
+    "dct_matrix", "filter_via_dct", "route_and_solve",
     "from_task", "plan_operator", "construct", "synthesize",
+    "InstantSpectralCodec", "all_invariants",
     "audio", "image", "graph", "text", "timeseries",
     "video", "voxel", "pointcloud", "molecular",
     "financial", "tabular", "mesh",
+    "solve", "sort", "filter", "cluster_data",
 ]

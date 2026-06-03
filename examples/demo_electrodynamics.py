@@ -6,6 +6,7 @@ import numpy as np
 import sft
 
 OUT = os.path.join(os.path.dirname(__file__), "reports", "electrodynamics.md")
+os.makedirs(os.path.dirname(OUT), exist_ok=True)
 
 def em_energy_momentum(v, k_poincare, eps=1e-4):
     """4-momentum P^μ = (E/c, p/c) for spherical charge shell with Poincaré stress k."""

@@ -14,7 +14,8 @@ sft.constructor — Operator synthesis: task → genus → blueprint → Operato
 ╚══════════════════════════════════════════════════════════════════════╝
 """
 import numpy as np
-from .core import OperatorFamily
+import warnings
+from .core import OperatorFamily, coordinate_diagonal_basis
 from .tasks import OperatorGenus, classify_task
 
 
@@ -38,11 +39,16 @@ def construct(blueprint: dict, data: np.ndarray) -> OperatorFamily:
     N, M, bt = blueprint["N"], blueprint["M"], blueprint["basis_type"]
     d = np.asarray(data, np.float64)
     if bt == "diagonal":
-        return OperatorFamily(np.eye(N), [np.diag(np.eye(N)[i]) for i in range(M)])
+        return OperatorFamily(np.eye(N), coordinate_diagonal_basis(N, M))
     elif bt == "edge_laplacian":
         from .families import graph_laplacian; return graph_laplacian(np.abs(d) > 1e-10)
     elif bt == "toeplitz":
         from .families import toeplitz; return toeplitz(N, diagonals=M)
+    warnings.warn(
+        f"Unknown basis_type={bt!r}; falling back to deterministic random symmetric basis.",
+        UserWarning,
+        stacklevel=2,
+    )
     rng = np.random.default_rng(0)
     basis = [(rng.standard_normal((N, N)) + rng.standard_normal((N, N)).T) / 2 for _ in range(M)]
     return OperatorFamily(np.eye(N), basis)

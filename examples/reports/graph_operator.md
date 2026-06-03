@@ -15,11 +15,11 @@ Every query is O(1). No malloc on query path.
 
 | Metric | Value |
 |--------|-------|
-| Build time | **61.2ms** |
+| Build time | **67.5ms** |
 | Components | 7  |
 | Bridges | **2** |
 | Articulation points | **3** |
-| 1000 bridge queries | **0.41ms** |
+| 1000 bridge queries | **0.40ms** |
 | 1000 articulation queries | **0.15ms** |
 
 ## Scale test
@@ -27,7 +27,7 @@ Every query is O(1). No malloc on query path.
 | V | E | Build | Bridges | Articulations |
 |---|----|:---:|:-----:|:----------:|
 | 100 | 400 | 0.6ms | — | — |
-| **5000** | **24991** | **61.2ms** | **2** | **3** |
+| **5000** | **24991** | **67.5ms** | **2** | **3** |
 | 10000 | 40000 | 88.6ms | 33 | 34 |
 
 ## Interpretation

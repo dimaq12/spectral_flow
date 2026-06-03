@@ -62,11 +62,226 @@ sft.core — Spectral Flow Transform: kernel, prediction, inverse design.
 ╚══════════════════════════════════════════════════════════════════════╝
 """
 from __future__ import annotations
+from dataclasses import dataclass
 from typing import Optional, Tuple
+import warnings
 import numpy as np
 from scipy import linalg, sparse
 
 _is_sparse = lambda x: sparse.issparse(x) if hasattr(sparse, 'issparse') else False
+
+
+@dataclass(frozen=True)
+class ReferenceState:
+    k_ref: np.ndarray
+    lam: np.ndarray
+    vecs: np.ndarray
+
+
+@dataclass(frozen=True)
+class KernelState:
+    W: np.ndarray
+    W_pinv: np.ndarray
+    rank: int
+    singular: np.ndarray
+
+
+class InverseResult(tuple):
+    """Backward-compatible inverse result.
+
+    Behaves like ``(k, error, converged)`` for tuple unpacking while exposing
+    diagnostics needed by heavy inverse tasks.
+    """
+
+    def __new__(cls, k: np.ndarray, error: float, converged: bool,
+                steps: int = 0, n_refresh: int = 0,
+                condition_number: float = np.inf):
+        obj = super().__new__(cls, (k, error, converged))
+        obj.steps = int(steps)
+        obj.n_refresh = int(n_refresh)
+        obj.condition_number = float(condition_number)
+        return obj
+
+    @property
+    def k(self) -> np.ndarray:
+        return self[0]
+
+    @property
+    def error(self) -> float:
+        return self[1]
+
+    @property
+    def converged(self) -> bool:
+        return self[2]
+
+
+class _DenseBasisBackend:
+    kind = "dense"
+
+    def __init__(self, basis: list[np.ndarray], N: int):
+        self.N = N
+        self.M = len(basis)
+        self._basis_list = [
+            B.toarray() if _is_sparse(B) else np.asarray(B, dtype=np.float64).copy()
+            for B in basis
+        ]
+        for idx, B in enumerate(self._basis_list):
+            if B.shape != (self.N, self.N):
+                raise ValueError(f"basis[{idx}] must have shape ({self.N}, {self.N}), got {B.shape}")
+        self.stack = (
+            np.stack(self._basis_list)
+            if self.M > 0
+            else np.empty((0, self.N, self.N))
+        )
+
+    @property
+    def basis(self) -> list[np.ndarray]:
+        return self._basis_list
+
+    @property
+    def materialized_elements(self) -> int:
+        return self.M * self.N * self.N
+
+    def build_delta(self, k: np.ndarray) -> np.ndarray:
+        if self.M == 0:
+            return np.zeros((self.N, self.N))
+        return np.tensordot(k, self.stack, axes=((0,), (0,)))
+
+    def kernel(self, V: np.ndarray, batch_limit: int) -> np.ndarray:
+        if self.M == 0:
+            return np.empty((V.shape[0], 0))
+        elements_per_basis = self.N * self.N
+        batch_M = max(1, batch_limit // max(elements_per_basis, 1))
+        if self.M <= batch_M:
+            BsV = self.stack @ V
+            return np.einsum('ni,mni->im', V, BsV)
+        W = np.empty((V.shape[0], self.M))
+        for b in range(0, self.M, batch_M):
+            be = min(b + batch_M, self.M)
+            BsV_b = self.stack[b:be] @ V
+            W[:, b:be] = np.einsum('ni,mni->im', V, BsV_b)
+        return W
+
+
+class _EdgeLaplacianBasisBackend:
+    """Implicit edge-Laplacian basis B_e=(e_u-e_v)(e_u-e_v)^T."""
+
+    kind = "edge_laplacian"
+
+    def __init__(self, N: int, edges: list[tuple[int, int]]):
+        self.N = N
+        self.edges = [(int(u), int(v)) for u, v in edges]
+        for u, v in self.edges:
+            if not (0 <= u < N and 0 <= v < N):
+                raise ValueError(f"edge ({u}, {v}) is outside node range 0..{N - 1}")
+        self.M = len(self.edges)
+        self._u = np.array([u for u, _ in self.edges], dtype=np.int64)
+        self._v = np.array([v for _, v in self.edges], dtype=np.int64)
+        self._basis_list: list[np.ndarray] | None = None
+
+    @property
+    def basis(self) -> list[np.ndarray]:
+        if self._basis_list is None:
+            basis = []
+            for u, v in self.edges:
+                B = np.zeros((self.N, self.N))
+                B[u, u] = B[v, v] = 1.0
+                B[u, v] = B[v, u] = -1.0
+                basis.append(B)
+            self._basis_list = basis
+        return self._basis_list
+
+    @property
+    def materialized_elements(self) -> int:
+        return self.M * self.N * self.N
+
+    def build_delta(self, k: np.ndarray) -> np.ndarray:
+        L = np.zeros((self.N, self.N))
+        for weight, u, v in zip(k, self._u, self._v):
+            L[u, u] += weight
+            L[v, v] += weight
+            L[u, v] -= weight
+            L[v, u] -= weight
+        return L
+
+    def kernel(self, V: np.ndarray, batch_limit: int) -> np.ndarray:
+        if self.M == 0:
+            return np.empty((V.shape[0], 0))
+        diff = V[self._u, :] - V[self._v, :]
+        return diff.T ** 2
+
+
+def edge_laplacian_basis(N: int, edges: list[tuple[int, int]]) -> _EdgeLaplacianBasisBackend:
+    """Create an implicit edge-Laplacian basis backend for OperatorFamily."""
+    return _EdgeLaplacianBasisBackend(N, edges)
+
+
+class _CoordinateDiagonalBasisBackend:
+    """Implicit basis B_j = diag(e_j), used by task constructors."""
+
+    kind = "coordinate_diagonal"
+
+    def __init__(self, N: int, M: int | None = None):
+        self.N = N
+        self.M = N if M is None else min(int(M), N)
+        self._basis_list: list[np.ndarray] | None = None
+
+    @property
+    def basis(self) -> list[np.ndarray]:
+        if self._basis_list is None:
+            self._basis_list = [np.diag(np.eye(self.N)[i]) for i in range(self.M)]
+        return self._basis_list
+
+    @property
+    def materialized_elements(self) -> int:
+        return self.M * self.N * self.N
+
+    def build_delta(self, k: np.ndarray) -> np.ndarray:
+        D = np.zeros((self.N, self.N))
+        idx = np.arange(self.M)
+        D[idx, idx] = k
+        return D
+
+    def kernel(self, V: np.ndarray, batch_limit: int) -> np.ndarray:
+        return V[:self.M, :].T ** 2
+
+
+def coordinate_diagonal_basis(N: int, M: int | None = None) -> _CoordinateDiagonalBasisBackend:
+    """Create an implicit coordinate-diagonal basis backend."""
+    return _CoordinateDiagonalBasisBackend(N, M)
+
+
+class _RepeatedIdentityBasisBackend:
+    """Implicit basis B_j = I for all j, preserving families.diagonal()."""
+
+    kind = "repeated_identity"
+
+    def __init__(self, N: int, M: int | None = None):
+        self.N = N
+        self.M = N if M is None else int(M)
+        self._basis_list: list[np.ndarray] | None = None
+
+    @property
+    def basis(self) -> list[np.ndarray]:
+        if self._basis_list is None:
+            eye = np.eye(self.N)
+            self._basis_list = [eye.copy() for _ in range(self.M)]
+        return self._basis_list
+
+    @property
+    def materialized_elements(self) -> int:
+        return self.M * self.N * self.N
+
+    def build_delta(self, k: np.ndarray) -> np.ndarray:
+        return np.eye(self.N) * float(np.sum(k))
+
+    def kernel(self, V: np.ndarray, batch_limit: int) -> np.ndarray:
+        return np.ones((V.shape[0], self.M))
+
+
+def repeated_identity_basis(N: int, M: int | None = None) -> _RepeatedIdentityBasisBackend:
+    """Create an implicit repeated-identity basis backend."""
+    return _RepeatedIdentityBasisBackend(N, M)
 
 
 # ────────────────────────────────────────────────────
@@ -105,7 +320,13 @@ class OperatorFamily:
         """
         self._sparse_mode = _is_sparse(A0)
         self.N = A0.shape[0]
-        self.M = len(basis)
+        if A0.shape[0] != A0.shape[1]:
+            raise ValueError(f"A0 must be a square matrix, got {A0.shape}")
+        if hasattr(basis, "build_delta") and hasattr(basis, "kernel"):
+            self._basis_backend = basis
+        else:
+            self._basis_backend = _DenseBasisBackend(basis, self.N)
+        self.M = self._basis_backend.M
         self.svd_tol = svd_tol
         self.convergence_tol = convergence_tol
         self.k_eigs = k_eigs or min(self.N, 128)
@@ -115,15 +336,19 @@ class OperatorFamily:
         if self._sparse_mode:
             self.A0_sparse = A0.tocsc()
             self.A0 = self.A0_sparse.toarray()
-            self._basis_sparse = [B.tocsc() for B in basis] if self.M > 0 else []
-            self._basis_list = [B.toarray() for B in basis] if self.M > 0 else []
-            self._basis_stack = np.stack(self._basis_list) if self.M > 0 else np.empty((0, self.N, self.N))
+            self._basis_sparse = [B.tocsc() for B in basis] if isinstance(basis, list) and self.M > 0 else []
         else:
-            self.A0 = A0.copy()
-            self._basis_list = [B.copy() for B in basis]
-            self._basis_stack = np.stack(self._basis_list) if self.M > 0 else np.empty((0, self.N, self.N))
+            self.A0 = np.asarray(A0, dtype=np.float64).copy()
             self.A0_sparse = None
             self._basis_sparse = []
+        self._basis_list = self._basis_backend.basis if self._basis_backend.kind == "dense" else []
+        self._basis_stack = getattr(self._basis_backend, "stack", np.empty((0, self.N, self.N)))
+        if getattr(self._basis_backend, "materialized_elements", 0) > 50_000_000 and self._basis_backend.kind == "dense":
+            warnings.warn(
+                "Dense basis requires more than 50M elements; use a structured basis backend for heavy tasks.",
+                ResourceWarning,
+                stacklevel=2,
+            )
 
         self._lam0: Optional[np.ndarray] = None
         self._vecs: Optional[np.ndarray] = None
@@ -131,12 +356,52 @@ class OperatorFamily:
         self._Wp: Optional[np.ndarray] = None
         self._W_rank: Optional[int] = None
         self._W_singular: Optional[np.ndarray] = None
+        self._reference_state: Optional[ReferenceState] = None
+        self._kernel_state: Optional[KernelState] = None
         self.set_reference(self.A0, k0=np.zeros(self.M))
 
     @property
     def basis(self) -> list[np.ndarray]:
         """CONTRACT: returns the basis matrices B_j as a list. Immutable copy."""
-        return self._basis_list
+        return self._basis_backend.basis
+
+    @property
+    def basis_kind(self) -> str:
+        """Internal basis representation: dense, edge_laplacian, ..."""
+        return self._basis_backend.kind
+
+    @property
+    def reference_state(self) -> ReferenceState:
+        """Current spectral reference: k_ref, eigenvalues, eigenvectors."""
+        if self._reference_state is None or self._stale:
+            self.set_reference(self.A0, k0=np.zeros(self.M))
+        return self._reference_state  # type: ignore[return-value]
+
+    @property
+    def kernel_state(self) -> KernelState:
+        """Current kernel cache: W, W_pinv, rank, singular values."""
+        if self._kernel_state is None or self._stale:
+            self.set_reference(self.A0, k0=np.zeros(self.M))
+        return self._kernel_state  # type: ignore[return-value]
+
+    def _check_k(self, k: np.ndarray, name: str = "k") -> np.ndarray:
+        arr = np.asarray(k, dtype=np.float64).ravel()
+        if arr.shape != (self.M,):
+            raise ValueError(f"{name} must have shape ({self.M},), got {arr.shape}")
+        return arr
+
+    def _check_target(self, target: np.ndarray) -> np.ndarray:
+        arr = np.asarray(target, dtype=np.float64).ravel()
+        if arr.size < self.N:
+            raise ValueError(f"target_lam must contain at least {self.N} values, got {arr.size}")
+        if arr.size > self.N:
+            warnings.warn(
+                f"target_lam has {arr.size} values; using the first {self.N}.",
+                UserWarning,
+                stacklevel=2,
+            )
+            arr = arr[:self.N]
+        return arr
 
     # ──────────────────────────────────────────
     #  build(k)
@@ -146,6 +411,7 @@ class OperatorFamily:
     #    PERF: O(M·N²) via tensordot (BLAS).  Cached on repeated k.
     # ──────────────────────────────────────────
     def build(self, k: np.ndarray) -> np.ndarray:
+        k = self._check_k(k)
         k_tuple = tuple(np.round(k, 8))
         if (hasattr(self, '_last_build_key') and
             self._last_build_key is not None and
@@ -154,7 +420,7 @@ class OperatorFamily:
         if self.M == 0:
             result = self.A0.copy()
         else:
-            result = self.A0 + np.tensordot(k, self._basis_stack, axes=((0,), (0,)))
+            result = self.A0 + self._basis_backend.build_delta(k)
         self._last_build_key = k_tuple
         self._last_build_result = result
         return result
@@ -171,7 +437,7 @@ class OperatorFamily:
             try:
                 return sparse.linalg.eigsh(A, k=self.k_eigs, which='SM')
             except (sparse.linalg.ArpackError, Exception):
-                pass
+                warnings.warn("sparse eigsh failed; falling back to dense eigh", RuntimeWarning, stacklevel=2)
         return linalg.eigh(A)
 
     # ──────────────────────────────────────────
@@ -199,22 +465,12 @@ class OperatorFamily:
         self._last_build_result = None
         V = self._vecs
         if self.M == 0:
-            self._W = np.empty((self.N, 0))
+            self._W = np.empty((len(self._lam0), 0))
         else:
             BATCH_LIMIT = 5_000_000
-            elements_per_basis = self.N * self.N
-            batch_M = max(1, BATCH_LIMIT // max(elements_per_basis, 1))
-            if self.M <= batch_M:
-                BsV = self._basis_stack @ V
-                self._W = np.einsum('ni,mni->im', V, BsV)
-            else:
-                self._W = np.empty((self.N, self.M))
-                for b in range(0, self.M, batch_M):
-                    be = min(b + batch_M, self.M)
-                    BsV_b = self._basis_stack[b:be] @ V
-                    self._W[:, b:be] = np.einsum('ni,mni->im', V, BsV_b)
+            self._W = self._basis_backend.kernel(V, BATCH_LIMIT)
         if k0 is not None:
-            self._k0_ref = np.asarray(k0).copy()
+            self._k0_ref = self._check_k(k0, "k0").copy()
         U, s, Vt = linalg.svd(self._W, full_matrices=False)
         tol = self.svd_tol * max(s[0], 1e-12) if len(s) > 0 else 1e-12
         self._W_rank = int(np.sum(s > tol))
@@ -224,6 +480,8 @@ class OperatorFamily:
         else:
             self._Wp = np.zeros((self.M, self.N))
         self._W_singular = s
+        self._reference_state = ReferenceState(self._k0_ref.copy(), self._lam0.copy(), self._vecs.copy())
+        self._kernel_state = KernelState(self._W.copy(), self._Wp.copy(), self._W_rank, self._W_singular.copy())
         return self
 
     @property
@@ -277,6 +535,7 @@ class OperatorFamily:
     #    O(N³) — expensive, use .predict() when approximation is OK
     # ──────────────────────────────────────────
     def spectrum(self, k: np.ndarray) -> np.ndarray:
+        k = self._check_k(k)
         return np.sort(self._eigh(self.build(k))[0])
 
     # ──────────────────────────────────────────
@@ -288,6 +547,7 @@ class OperatorFamily:
     #    O(N·M) — cheap
     # ──────────────────────────────────────────
     def predict(self, dk: np.ndarray) -> np.ndarray:
+        dk = self._check_k(dk, "dk")
         return self.lam0 + self.W @ dk
 
     # ──────────────────────────────────────────
@@ -298,6 +558,7 @@ class OperatorFamily:
     #    NOTE: differs from predict() which always uses k₀=0.
     # ──────────────────────────────────────────
     def predict_at(self, k: np.ndarray) -> np.ndarray:
+        k = self._check_k(k)
         return self.lam0 + self.W @ (k - self._k0_ref)
 
     # ──────────────────────────────────────────
@@ -313,9 +574,11 @@ class OperatorFamily:
     # ──────────────────────────────────────────
     def inverse(self, target_lam: np.ndarray,
                 steps: int = 20, alpha: float = 0.3,
-                refresh_every: int = 5) -> Tuple[np.ndarray, float, bool]:
+                refresh_every: int = 5) -> InverseResult:
+        target_lam = self._check_target(target_lam)
         k = np.zeros(self.M)
-        self.set_reference(self.build(k))
+        self.set_reference(self.build(k), k0=k)
+        n_refresh = 1
         best_err = np.inf
         prev_err = np.inf
         stagnation_count = 0
@@ -324,10 +587,13 @@ class OperatorFamily:
             err = float(np.max(np.abs(lam - target_lam)))
             best_err = min(best_err, err)
             if err < self.convergence_tol:
-                return k, err, True
+                return InverseResult(k, err, True, steps=step + 1,
+                                     n_refresh=n_refresh,
+                                     condition_number=self.condition_number())
             if step > 0 and (step % refresh_every == 0 or
                               (err > prev_err * 0.9 and stagnation_count >= 2)):
-                self.set_reference(self.build(k))
+                self.set_reference(self.build(k), k0=k)
+                n_refresh += 1
                 stagnation_count = 0
             if err >= prev_err * 0.95:
                 stagnation_count += 1
@@ -338,7 +604,9 @@ class OperatorFamily:
             k += dk
         lam = self.spectrum(k)
         final = float(np.max(np.abs(lam - target_lam)))
-        return k, final, best_err < self.convergence_tol
+        return InverseResult(k, final, best_err < self.convergence_tol,
+                             steps=steps, n_refresh=n_refresh,
+                             condition_number=self.condition_number())
 
     # ──────────────────────────────────────────
     #  condition_number()

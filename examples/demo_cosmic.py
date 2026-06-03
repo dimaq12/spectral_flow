@@ -6,6 +6,7 @@ import numpy as np
 import sft
 
 OUT = os.path.join(os.path.dirname(__file__), "reports", "cosmic_dynamics.md")
+os.makedirs(os.path.dirname(OUT), exist_ok=True)
 
 def gravitational_operator(positions):
     diff = positions[:, None] - positions[None, :]

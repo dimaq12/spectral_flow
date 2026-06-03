@@ -13,7 +13,7 @@ class AudioAdapter(BaseAdapter):
 
     Example
     -------
-    >>> sound = AudioAdapter(signal, sr=44100, n_bands=16)
+    >>> sound = AudioAdapter(signal, sample_rate=44100, n_bands=16)
     >>> W = sound.kernel       # (n_bands, n_bands) spectral response matrix
     >>> lam = sound.predict(gain_changes)  # predict spectrum after EQ
     """

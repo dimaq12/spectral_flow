@@ -30,5 +30,11 @@ class BaseAdapter:
         return self._family.complexity
 
     @property
-    def spectrum(self) -> np.ndarray:
+    def reference_spectrum(self) -> np.ndarray:
+        """Eigenvalues at the adapter family's current reference operator."""
         return self._family.lam0.copy()
+
+    @property
+    def spectrum(self) -> np.ndarray:
+        """Backward-compatible alias for reference_spectrum."""
+        return self.reference_spectrum
