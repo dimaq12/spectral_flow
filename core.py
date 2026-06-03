@@ -855,6 +855,31 @@ class OperatorFamily:
         """Fluent alias for inverse(target_lam, **kw)."""
         return self.inverse(target_lam, **kw)
 
+    def cost(self, operation: str | None = None):
+        """Estimate memory/eigensolve cost without executing a new operation."""
+        from .operator_algebra import OperatorCost
+        return OperatorCost.estimate(self, operation=operation)
+
+    def laws(self):
+        """Return core algebra laws attached to SFT families."""
+        from .operator_algebra import LawSet
+        return LawSet(self)
+
+    def verify(self) -> dict:
+        """Run independent core verification gates."""
+        return self.laws().verify().to_dict()
+
+    def oplus(self, other: 'OperatorFamily') -> 'OperatorFamily':
+        """Fluent direct sum alias."""
+        from . import algebra
+        return algebra.direct_sum(self, other)
+
+    def then(self, transform):
+        """Apply a deferred algebra transform."""
+        if hasattr(transform, "apply"):
+            return transform.apply(self)
+        return self @ transform
+
     def __add__(self, other):
         if not isinstance(other, OperatorFamily):
             return NotImplemented
@@ -862,6 +887,8 @@ class OperatorFamily:
         return algebra.direct_sum(self, other)
 
     def __matmul__(self, other):
+        if hasattr(other, "apply"):
+            return other.apply(self)
         arr = np.asarray(other, dtype=np.float64)
         if arr.ndim == 1:
             return self.predict(arr)

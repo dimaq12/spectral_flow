@@ -106,8 +106,15 @@ def route_and_solve(problem: str, data: np.ndarray):
     return data
 
 
-def task(problem: str, data: np.ndarray):
-    """Alias for route_and_solve, useful in fluent examples."""
+def task(problem: str, data: np.ndarray | None = None):
+    """Build a task spec with ``.on(data)`` or solve immediately with data.
+
+    ``task("cluster").on(X)`` is the operator-algebra planning API.
+    ``task("cluster", X)`` preserves the older route-and-solve behavior.
+    """
+    if data is None:
+        from .operator_algebra import TaskBuilder
+        return TaskBuilder(problem)
     return route_and_solve(problem, data)
 
 

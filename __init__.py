@@ -76,7 +76,7 @@ sft — Spectral Flow Transform v0.1.3
 __version__ = "0.3.0"
 
 from .core import OperatorFamily, InverseResult, nullspace, graph_response_kernel
-from . import algebra, topology, hessian, families, physics, benchmarks
+from . import algebra, topology, hessian, families, physics, benchmarks, operator_algebra
 from . import tasks, constructor, homotopy, graphop
 from . import compress, streaming, order, embed
 from . import cluster, carleman, transport, verify
@@ -95,6 +95,9 @@ from .tasks import OperatorGenus, classify_task, cdf_rank_sort, dct_matrix, filt
 from .constructor import OperatorBlueprint, from_task, plan_operator, construct, synthesize
 from .codec import InstantSpectralCodec
 from .invariants import all_invariants
+from .operator_algebra import (
+    OperatorInvariant, OperatorSpec, OperatorCost, OperatorLaw, CostModel,
+)
 
 def audio(s, **kw): return AudioAdapter(s, **kw)
 def image(p, **kw): return ImageAdapter(p, **kw)
@@ -140,7 +143,7 @@ def cluster_data(data, **kw): return tasks.cluster_via_laplacian(data, **kw)
 
 __all__ = [
     "OperatorFamily", "InverseResult", "nullspace", "graph_response_kernel",
-    "algebra", "topology", "hessian", "families", "physics", "benchmarks",
+    "algebra", "topology", "hessian", "families", "physics", "benchmarks", "operator_algebra",
     "tasks", "constructor", "homotopy", "graphop",
     "compress", "streaming", "order", "embed",
     "cluster", "carleman", "transport", "verify",
@@ -154,6 +157,7 @@ __all__ = [
     "OperatorGenus", "classify_task", "cdf_rank_sort",
     "dct_matrix", "filter_via_dct", "route_and_solve", "task", "pipe",
     "OperatorBlueprint", "from_task", "plan_operator", "construct", "synthesize",
+    "OperatorInvariant", "OperatorSpec", "OperatorCost", "OperatorLaw", "CostModel",
     "InstantSpectralCodec", "all_invariants",
     "audio", "image", "graph", "text", "timeseries",
     "video", "voxel", "pointcloud", "molecular",

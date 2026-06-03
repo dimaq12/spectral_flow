@@ -66,6 +66,73 @@ The speedup isn't about avoiding `eigh` entirely — that's impossible for spect
 
 ---
 
+## Verification Philosophy
+
+SFT separates impressive demos from claims that are allowed into the library
+core. A result can be spectacular and still remain a showcase until it passes
+independent verification.
+
+| Layer | What It Means | Promotion Rule |
+|-------|---------------|----------------|
+| `theory-core` | Mathematical spine: `W`, perturbation order, refreshed inverse, algebra laws, topology controls | Requires deterministic metrics, thresholds, and negative controls |
+| `library-api` | Stable user-facing classes and functions | Requires CI-ready tests and backwards-compatible contracts |
+| `showcase-demo` | Reproducible examples that demonstrate power | Must report scope and limits; not automatically core |
+| `research-lab` | Promising experiments with broad claims | Stays outside stable API until evidence improves |
+
+Run the independent core gates:
+
+```bash
+python3 -m pytest tests/test_operator_algebra_verification.py tests/test_negative_controls.py
+python3 examples/demo_verification_report.py
+```
+
+The report classifies claims such as `CORE-HF-001`, `CORE-PERT-002`,
+`CORE-INV-003`, `CORE-ALG-004`, and `CORE-NEG-005` with metrics, thresholds,
+evidence level, and promotion recommendation.
+
+---
+
+## Operator Algebra Core
+
+The core API is organized around a strict pipeline:
+
+```text
+task intent -> invariant -> operator genus -> basis/representation -> family -> laws -> verification
+```
+
+This keeps SFT from becoming a bag of demos. Applied ideas such as text graphs,
+spectral NLP, LLM embeddings, and relation graphs should be packages built on
+top of the core unless they pass their own evidence gates.
+
+```python
+spec = sft.task("bandpass filter").on(signal)
+blueprint = spec.plan()
+
+print(spec.invariant.name)      # frequency_band_energy
+print(blueprint.basis_type)     # toeplitz
+print(blueprint.cost["memory_mb"])
+
+family = blueprint.build(signal)
+print(family.cost().eigensolve)
+print(family.laws().verify().status)
+```
+
+Core operator algebra also exposes explicit cost and law objects:
+
+```python
+from sft.operator_algebra import OperatorSpec, CostModel
+
+spec = OperatorSpec.from_task("cluster points", X)
+family = spec.to_family(X)
+cost = CostModel.estimate(family)
+```
+
+Performance is part of the contract: algebra operations report when they may
+materialize a structured basis, when tensor products grow the state space, and
+which eigensolver path is expected.
+
+---
+
 ## Quick start
 
 ```bash

@@ -22,11 +22,35 @@ sft.algebra — Operator calculus: ⊕, ∘, ⊗, ∫ expectation.
 ╚══════════════════════════════════════════════════════════════════════╝
 """
 from __future__ import annotations
+from dataclasses import dataclass
 from typing import Any
 import warnings
 import numpy as np
 from scipy import linalg  # noqa: F401
 from .core import OperatorFamily
+
+
+@dataclass(frozen=True)
+class AlgebraTransform:
+    """Deferred algebra operation used by fluent APIs."""
+
+    kind: str
+    payload: np.ndarray
+
+    def apply(self, family: OperatorFamily) -> OperatorFamily:
+        if self.kind in {"compose", "pullback"}:
+            return compose_linear(family, self.payload)
+        raise ValueError(f"unknown algebra transform: {self.kind}")
+
+
+def _attach_algebra_metadata(family: OperatorFamily, operation: str,
+                             before: tuple[Any, ...]) -> OperatorFamily:
+    from .operator_algebra import OperatorCost
+
+    family.algebra_operation = operation
+    family.cost_after = OperatorCost.estimate(family, operation=operation)
+    family.cost_before = tuple(OperatorCost.estimate(obj, operation=operation) for obj in before)
+    return family
 
 
 # ────────────────────────────────────────────────────
@@ -55,7 +79,7 @@ def direct_sum(fam_a: OperatorFamily, fam_b: OperatorFamily) -> OperatorFamily:
         else:
             B[na:, na:] = fam_b.basis[j - ma]
         basis_ab.append(B)
-    return OperatorFamily(A0_ab, basis_ab)
+    return _attach_algebra_metadata(OperatorFamily(A0_ab, basis_ab), "direct_sum", (fam_a, fam_b))
 
 
 # ────────────────────────────────────────────────────
@@ -81,7 +105,7 @@ def compose_linear(outer: OperatorFamily, C: np.ndarray) -> OperatorFamily:
         )
     outer_stack = np.stack(outer.basis) if outer.M > 0 else np.empty((0, outer.N, outer.N))
     basis_new = np.tensordot(C.T, outer_stack, axes=((1,), (0,)))
-    return OperatorFamily(outer.A0.copy(), list(basis_new))
+    return _attach_algebra_metadata(OperatorFamily(outer.A0.copy(), list(basis_new)), "compose", (outer,))
 # ────────────────────────────────────────────────────
 #  tensor_sum(A, B)  →  OperatorFamily
 #  CONTRACT:
@@ -103,12 +127,34 @@ def tensor_sum(fam_a: OperatorFamily, fam_b: OperatorFamily) -> OperatorFamily:
         basis_kron.append(np.kron(fam_a.basis[j], np.eye(nb)))
     for j in range(mb):
         basis_kron.append(np.kron(np.eye(na), fam_b.basis[j]))
-    return OperatorFamily(A0_kron, basis_kron)
+    return _attach_algebra_metadata(OperatorFamily(A0_kron, basis_kron), "tensor", (fam_a, fam_b))
 
 
 oplus = direct_sum
-compose = compose_linear
 otimes = tensor_sum
+
+
+def compose(*args):
+    """Compose immediately or return a deferred transform.
+
+    ``compose(fam, C)`` is equivalent to ``compose_linear(fam, C)``.
+    ``compose(C)`` returns a transform usable with ``family.then(...)``.
+    """
+    if len(args) == 1:
+        return AlgebraTransform("compose", np.asarray(args[0], dtype=np.float64))
+    if len(args) == 2:
+        return compose_linear(args[0], args[1])
+    raise TypeError("compose expects C or (family, C)")
+
+
+def pullback(C: np.ndarray) -> AlgebraTransform:
+    """Deferred parameter-space pullback ``A(k) -> A(Ck)``."""
+    return AlgebraTransform("pullback", np.asarray(C, dtype=np.float64))
+
+
+def estimate_cost(family: OperatorFamily, operation: str | None = None):
+    from .operator_algebra import OperatorCost
+    return OperatorCost.estimate(family, operation=operation)
 
 
 # ────────────────────────────────────────────────────

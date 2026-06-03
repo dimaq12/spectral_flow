@@ -16,6 +16,7 @@ sft.constructor — Operator synthesis: task → genus → blueprint → Operato
 import numpy as np
 import warnings
 from dataclasses import dataclass
+from typing import Any
 from .core import OperatorFamily, coordinate_diagonal_basis
 from .tasks import OperatorGenus, classify_task
 
@@ -27,10 +28,19 @@ class OperatorBlueprint:
     M: int
     basis_type: str
     description: str
+    invariant: str = "spectral_response"
+    layer: str = "theory-core"
+    cost: dict[str, Any] | None = None
 
     @classmethod
     def from_task(cls, task_name: str, data: np.ndarray) -> "OperatorBlueprint":
         return cls.from_dict(plan_operator(task_name, data))
+
+    @classmethod
+    def from_spec(cls, spec: Any, data: np.ndarray | None = None) -> "OperatorBlueprint":
+        if data is None:
+            data = np.zeros(spec.data_shape or (1,))
+        return cls.from_dict(plan_operator(spec.task_name, np.asarray(data)))
 
     @classmethod
     def from_dict(cls, blueprint: dict) -> "OperatorBlueprint":
@@ -40,6 +50,9 @@ class OperatorBlueprint:
             M=int(blueprint["M"]),
             basis_type=str(blueprint["basis_type"]),
             description=str(blueprint.get("description", "")),
+            invariant=str(blueprint.get("invariant", "spectral_response")),
+            layer=str(blueprint.get("layer", "theory-core")),
+            cost=blueprint.get("cost"),
         )
 
     def to_dict(self) -> dict:
@@ -49,24 +62,47 @@ class OperatorBlueprint:
             "M": self.M,
             "basis_type": self.basis_type,
             "description": self.description,
+            "invariant": self.invariant,
+            "layer": self.layer,
+            "cost": self.cost,
         }
 
     def build(self, data: np.ndarray) -> OperatorFamily:
         return construct(self, data)
+
+    def verify(self) -> dict:
+        from . import verify
+        return verify.verify_blueprint(self).to_dict()
 
 
 def plan_operator(task_name: str, data: np.ndarray) -> dict:
     """Task → blueprint dict {genus, N, M, basis_type, description}."""
     genus = classify_task(task_name)
     N = data.shape[0] if data.ndim == 1 else max(data.shape[:2])
+    from .operator_algebra import OperatorCost, infer_invariant
+    invariant = infer_invariant(task_name, genus)
     bp = {"genus": genus, "N": N, "M": min(N, 32), "basis_type": "diagonal",
-          "description": f"{genus.name} operator for: {task_name}"}
+          "description": f"{genus.name} operator for: {task_name}",
+          "invariant": invariant.name,
+          "layer": "theory-core"}
     if genus == OperatorGenus.GRAPH and data.ndim == 2 and data.shape[0] == data.shape[1]:
         bp["basis_type"] = "edge_laplacian"
         row, _ = np.triu(np.abs(data) > 1e-10, 1).nonzero()
         bp["M"] = min(len(row), 200)
     elif genus in (OperatorGenus.COMPRESS, OperatorGenus.QUAD):
         bp["basis_type"] = "toeplitz"; bp["M"] = min(N - 1, 16)
+    materialized = int(bp["M"]) * int(bp["N"]) * int(bp["N"])
+    if bp["basis_type"] == "edge_laplacian":
+        materialized = int(bp["M"]) * max(int(bp["N"]), 1)
+    bp["cost"] = OperatorCost(
+        N=int(bp["N"]),
+        M=int(bp["M"]),
+        basis_kind=str(bp["basis_type"]),
+        materialized_elements=materialized,
+        memory_mb=materialized * 8.0 / (1024.0 ** 2),
+        eigensolve="sparse" if bp["basis_type"] == "edge_laplacian" or N >= 512 else "dense",
+        materializes_basis=False,
+    ).to_dict()
     return bp
 
 

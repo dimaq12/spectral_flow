@@ -20,3 +20,16 @@ def test_run_verification_suite_includes_geometry_gates():
         "G4_second_order_inverse",
     ):
         assert key in result
+
+
+def test_run_verification_suite_includes_independent_core_gates():
+    result = sft.verify.run_verification_suite()
+    core = result["CORE_structured"]
+    for key in (
+        "CORE-HF-001",
+        "CORE-PERT-002",
+        "CORE-INV-003",
+        "CORE-ALG-004",
+        "CORE-NEG-005",
+    ):
+        assert core[key]["status"] == "PASS"
