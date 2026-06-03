@@ -15,8 +15,44 @@ sft.constructor — Operator synthesis: task → genus → blueprint → Operato
 """
 import numpy as np
 import warnings
+from dataclasses import dataclass
 from .core import OperatorFamily, coordinate_diagonal_basis
 from .tasks import OperatorGenus, classify_task
+
+
+@dataclass(frozen=True)
+class OperatorBlueprint:
+    genus: OperatorGenus
+    N: int
+    M: int
+    basis_type: str
+    description: str
+
+    @classmethod
+    def from_task(cls, task_name: str, data: np.ndarray) -> "OperatorBlueprint":
+        return cls.from_dict(plan_operator(task_name, data))
+
+    @classmethod
+    def from_dict(cls, blueprint: dict) -> "OperatorBlueprint":
+        return cls(
+            genus=blueprint["genus"],
+            N=int(blueprint["N"]),
+            M=int(blueprint["M"]),
+            basis_type=str(blueprint["basis_type"]),
+            description=str(blueprint.get("description", "")),
+        )
+
+    def to_dict(self) -> dict:
+        return {
+            "genus": self.genus,
+            "N": self.N,
+            "M": self.M,
+            "basis_type": self.basis_type,
+            "description": self.description,
+        }
+
+    def build(self, data: np.ndarray) -> OperatorFamily:
+        return construct(self, data)
 
 
 def plan_operator(task_name: str, data: np.ndarray) -> dict:
@@ -34,8 +70,10 @@ def plan_operator(task_name: str, data: np.ndarray) -> dict:
     return bp
 
 
-def construct(blueprint: dict, data: np.ndarray) -> OperatorFamily:
+def construct(blueprint: dict | OperatorBlueprint, data: np.ndarray) -> OperatorFamily:
     """Blueprint → OperatorFamily."""
+    if isinstance(blueprint, OperatorBlueprint):
+        blueprint = blueprint.to_dict()
     N, M, bt = blueprint["N"], blueprint["M"], blueprint["basis_type"]
     d = np.asarray(data, np.float64)
     if bt == "diagonal":

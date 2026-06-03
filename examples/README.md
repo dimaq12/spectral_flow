@@ -16,9 +16,12 @@ Each script writes a markdown report into `sft/examples/reports/`.
 
 | Demo | Why run it |
 |------|------------|
-| `demo_benchmark.py` | Core speed: build, predict, exact eigensolve, inverse, topology |
+| `demo_benchmark.py` | Core speed: build, `predict_many`, exact/partial eigensolve, inverse diagnostics, topology |
 | `demo_adapters_load.py` | All 12 adapters from raw data to `OperatorFamily` |
 | `demo_topology.py` | Berry holonomy and eigenvector sign flip |
+| `demo_quantum_ep.py` | Non-Hermitian exceptional point and half-winding |
+| `demo_pde_multigrid.py` | Real sparse PDE operator convergence across grids |
+| `demo_inverse_graph_design.py` | Target spectrum -> recovered graph edge weights |
 | `demo_codec.py` | `W @ dk` encode and `W_pinv @ y` decode |
 | `demo_graphop.py` | O(1) bridge and articulation queries after precompute |
 

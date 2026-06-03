@@ -23,6 +23,7 @@ sft.algebra — Operator calculus: ⊕, ∘, ⊗, ∫ expectation.
 """
 from __future__ import annotations
 from typing import Any
+import warnings
 import numpy as np
 from scipy import linalg  # noqa: F401
 from .core import OperatorFamily
@@ -69,11 +70,18 @@ def direct_sum(fam_a: OperatorFamily, fam_b: OperatorFamily) -> OperatorFamily:
 #    >>> fam2 = compose_linear(fam, C)  # M: 4→2
 # ────────────────────────────────────────────────────
 def compose_linear(outer: OperatorFamily, C: np.ndarray) -> OperatorFamily:
-    outer_stack = outer._basis_stack
+    C = np.asarray(C, dtype=np.float64)
+    if C.ndim != 2 or C.shape[0] != outer.M:
+        raise ValueError(f"C must have shape ({outer.M}, m), got {C.shape}")
+    if outer.basis_kind != "dense" and getattr(outer._basis_backend, "materialized_elements", 0) > 10_000_000:
+        warnings.warn(
+            "compose_linear is materializing a structured basis; use a smaller projection or dense family.",
+            ResourceWarning,
+            stacklevel=2,
+        )
+    outer_stack = np.stack(outer.basis) if outer.M > 0 else np.empty((0, outer.N, outer.N))
     basis_new = np.tensordot(C.T, outer_stack, axes=((1,), (0,)))
     return OperatorFamily(outer.A0.copy(), list(basis_new))
-
-
 # ────────────────────────────────────────────────────
 #  tensor_sum(A, B)  →  OperatorFamily
 #  CONTRACT:
@@ -96,6 +104,11 @@ def tensor_sum(fam_a: OperatorFamily, fam_b: OperatorFamily) -> OperatorFamily:
     for j in range(mb):
         basis_kron.append(np.kron(np.eye(na), fam_b.basis[j]))
     return OperatorFamily(A0_kron, basis_kron)
+
+
+oplus = direct_sum
+compose = compose_linear
+otimes = tensor_sum
 
 
 # ────────────────────────────────────────────────────

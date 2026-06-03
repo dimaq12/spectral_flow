@@ -41,16 +41,14 @@ from .core import OperatorFamily
 #    >>> if len(swaps) > 0: print("Braiding detected!")
 # ────────────────────────────────────────────────────
 def monodromy(family: OperatorFamily,
-              loop: list[np.ndarray]) -> tuple[np.ndarray, list[tuple[int, int]]]:
+              loop: list[np.ndarray],
+              n_eigs: int | None = None,
+              which: str = "SM") -> tuple[np.ndarray, list[tuple[int, int]]]:
     n_steps = len(loop)
-    N = family.N
-    lams = np.zeros((n_steps, N))
-    vecs_hist = np.empty((n_steps, N, N))
+    N = n_eigs or family.N
 
     def _step(kvec):
-        lam, v = linalg.eigh(family.build(kvec))
-        idx = np.argsort(lam)
-        return lam[idx], v[:, idx]
+        return family.eigensystem(kvec, n_eigs=n_eigs, which=which)
 
     use_parallel = (N >= 64 and n_steps >= 32) or n_steps >= 512
     try:
@@ -62,12 +60,16 @@ def monodromy(family: OperatorFamily,
     except (ImportError, ModuleNotFoundError):
         results = [_step(kvec) for kvec in loop]
 
+    dtype = np.result_type(*[lam for lam, _ in results])
+    lams = np.zeros((n_steps, N), dtype=dtype)
+    vec_dtype = np.result_type(*[v for _, v in results])
+    vecs_hist = np.empty((n_steps, family.N, N), dtype=vec_dtype)
     for i, (lam, v) in enumerate(results):
         lams[i] = lam; vecs_hist[i] = v
 
-    tracked = np.zeros((n_steps, N)); tracked[0] = lams[0]
+    tracked = np.zeros((n_steps, N), dtype=dtype); tracked[0] = lams[0]
     for i_step in range(1, n_steps):
-        cost = -np.abs(vecs_hist[i_step - 1].T @ vecs_hist[i_step])
+        cost = -np.abs(vecs_hist[i_step - 1].conj().T @ vecs_hist[i_step])
         _, col_ind = linear_sum_assignment(cost)
         tracked[i_step] = lams[i_step, col_ind]
 
@@ -81,6 +83,31 @@ def monodromy(family: OperatorFamily,
     return tracked, swapped
 
 
+def eigenvalue_winding(family: OperatorFamily, loop: list[np.ndarray],
+                       pair: tuple[int, int] = (0, 1)) -> float:
+    """Winding of eigenvalue gap λ_i-λ_j around zero along a closed loop."""
+    lams = np.array([family.eigensystem(kvec)[0] for kvec in loop])
+    i, j = pair
+    gap = np.empty(len(loop), dtype=np.result_type(lams, complex))
+    gap[0] = lams[0, j] - lams[0, i]
+    for t in range(1, len(loop)):
+        raw = lams[t, j] - lams[t, i]
+        gap[t] = raw if abs(raw - gap[t - 1]) <= abs(-raw - gap[t - 1]) else -raw
+    phase = np.unwrap(np.angle(gap))
+    return float((phase[-1] - phase[0]) / (2 * np.pi))
+
+
+def complex_monodromy(family: OperatorFamily,
+                      loop: list[np.ndarray]) -> dict[str, object]:
+    """Complex-valued monodromy summary for non-Hermitian families."""
+    tracked, swaps = monodromy(family, loop)
+    windings = {}
+    for i in range(tracked.shape[1]):
+        for j in range(i + 1, tracked.shape[1]):
+            windings[(i, j)] = eigenvalue_winding(family, loop, (i, j))
+    return {"tracked": tracked, "swaps": swaps, "windings": windings}
+
+
 # ────────────────────────────────────────────────────
 #  berry_holonomy(family, loop, level) → ±1
 #  CONTRACT:
@@ -92,7 +119,7 @@ def monodromy(family: OperatorFamily,
 #    >>> assert holo == -1  # avoided crossing → Möbius
 # ────────────────────────────────────────────────────
 def berry_holonomy(family: OperatorFamily, loop: list[np.ndarray], level: int = 0) -> int:
-    vecs_arr = np.array([linalg.eigh(family.build(kvec))[1][:, level] for kvec in loop])
+    vecs_arr = np.array([family.eigensystem(kvec)[1][:, level] for kvec in loop])
     for i in range(1, len(vecs_arr)):
         if np.dot(vecs_arr[i], vecs_arr[i - 1]) < 0:
             vecs_arr[i] = -vecs_arr[i]
@@ -114,7 +141,7 @@ def exceptional_point_locus(family: OperatorFamily, grid_resolution: int = 50,
     k2 = np.linspace(k_range[0], k_range[1], grid_resolution)
     gap_map = np.zeros((grid_resolution, grid_resolution))
     for i, x in enumerate(k1):
-        row_lams = np.array([linalg.eigh(family.build(np.array([x, y])))[0] for y in k2])
+        row_lams = np.array([family.eigensystem(np.array([x, y]))[0] for y in k2])
         gaps = np.diff(row_lams, axis=1)
         gap_map[i] = gaps.min(axis=1) if gaps.shape[1] > 0 else 0.0
     return np.array([k1, k2]), gap_map
@@ -136,10 +163,63 @@ def exceptional_point_locus_nd(family: OperatorFamily, grid_resolution: int = 30
     for i, x in enumerate(k1):
         for j, y in enumerate(k2):
             kvec = np.zeros(family.M); kvec[a1] = x; kvec[a2] = y
-            lam = linalg.eigh(family.build(kvec))[0]
+            lam = family.eigensystem(kvec)[0]
             gaps = np.diff(lam)
             gap_map[i, j] = np.min(gaps) if len(gaps) > 0 else 0.0
     return np.array([k1, k2]), gap_map
+
+
+def exceptional_point_atlas(family: OperatorFamily, grid_resolution: int = 41,
+                            k_range: tuple[float, float] = (-1.0, 1.0),
+                            axis_pair: tuple[int, int] = (0, 1),
+                            threshold: float | None = None) -> dict[str, object]:
+    """Grid/refinement-ready atlas of near exceptional points.
+
+    The atlas reports small eigenvalue gaps and eigenvector coalescence scores.
+    It is intentionally numerical: candidates are hypotheses to inspect, not
+    theorem-level certificates.
+    """
+    a1, a2 = axis_pair
+    xs = np.linspace(k_range[0], k_range[1], grid_resolution)
+    ys = np.linspace(k_range[0], k_range[1], grid_resolution)
+    gap_map = np.zeros((grid_resolution, grid_resolution))
+    coalescence = np.zeros_like(gap_map)
+    candidates: list[dict[str, object]] = []
+    for i, x in enumerate(xs):
+        for j, y in enumerate(ys):
+            kvec = np.zeros(family.M)
+            kvec[a1] = x; kvec[a2] = y
+            lam, vecs = family.eigensystem(kvec)
+            if len(lam) < 2:
+                gap = 0.0
+            else:
+                diffs = np.abs(lam[:, None] - lam[None, :])
+                diffs[diffs == 0] = np.inf
+                finite = diffs[np.isfinite(diffs)]
+                gap = float(np.min(finite)) if finite.size else 0.0
+            gap_map[i, j] = gap
+            if vecs.shape[1] >= 2:
+                gram = np.abs(vecs.conj().T @ vecs)
+                np.fill_diagonal(gram, 0.0)
+                coalescence[i, j] = float(np.max(gram))
+    cutoff = threshold if threshold is not None else float(np.percentile(gap_map, 5))
+    for i, x in enumerate(xs):
+        for j, y in enumerate(ys):
+            if gap_map[i, j] <= cutoff:
+                candidates.append({
+                    "k": np.array([x, y]),
+                    "gap": float(gap_map[i, j]),
+                    "coalescence": float(coalescence[i, j]),
+                })
+    candidates.sort(key=lambda c: (c["gap"], -c["coalescence"]))
+    return {
+        "grid": np.array([xs, ys]),
+        "gap_map": gap_map,
+        "coalescence": coalescence,
+        "candidates": candidates,
+        "min_gap": float(np.min(gap_map)),
+        "threshold": float(cutoff),
+    }
 
 
 def spectral_flow(family: OperatorFamily, path: list[np.ndarray]) -> np.ndarray:

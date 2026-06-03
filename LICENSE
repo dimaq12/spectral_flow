@@ -1,0 +1,38 @@
+SFT Permissive Attribution License
+
+Copyright (c) 2026 Dmitry Sierikov
+
+Author attribution link: https://github.com/dimaq12/spectral_flow
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to use,
+copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software is furnished to do
+so, for private, academic, research, commercial, and proprietary purposes,
+subject to the following conditions:
+
+1. The above copyright notice, this license text, and the author attribution
+   link must be included in all copies or substantial portions of the Software.
+
+2. If the Software or a substantial portion of it is redistributed in source
+   form, binary form, package form, documentation, or a public product that
+   includes third-party notices, the attribution must be reasonably visible in
+   the relevant license, notice, documentation, or credits material.
+
+3. The required attribution is:
+
+   Spectral Flow Transform (SFT)
+   Copyright (c) 2026 Dmitry Sierikov
+   https://github.com/dimaq12/spectral_flow
+
+4. The name of Dmitry Sierikov may not be used to imply endorsement of any
+   derived work, product, service, or organization without prior written
+   permission.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE, NONINFRINGEMENT, AND TITLE. IN NO EVENT
+SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES, OR
+OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT, OR OTHERWISE,
+ARISING FROM, OUT OF, OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.

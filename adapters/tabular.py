@@ -34,7 +34,10 @@ class TabularAdapter(BaseAdapter):
 
     def _build(self):
         D = self.n_features
-        data_centered = self.data - np.nanmean(self.data, axis=0)[None, :]
+        valid_counts = np.sum(~np.isnan(self.data), axis=0)
+        sums = np.nansum(self.data, axis=0)
+        means = np.divide(sums, valid_counts, out=np.zeros(D), where=valid_counts > 0)
+        data_centered = self.data - means[None, :]
         mask = ~np.isnan(data_centered)
 
         Cov = np.zeros((D, D))

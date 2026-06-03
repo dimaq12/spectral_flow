@@ -28,7 +28,8 @@ class PointCloudAdapter(BaseAdapter):
             raise ValueError("Points must be (n_points, d)")
         self.n_points = self.points.shape[0]
         self.k = max(min(k, self.n_points - 1), 1)
-        self.sigma = sigma or np.max(np.std(self.points, axis=0))
+        sigma0 = sigma if sigma is not None else float(np.max(np.std(self.points, axis=0)))
+        self.sigma = max(float(sigma0), 1e-12)
         self._build()
 
     def _build(self):

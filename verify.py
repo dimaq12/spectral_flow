@@ -66,7 +66,7 @@ def verify_c8_universal_embedding() -> bool:
 
 
 def run_verification_suite() -> dict:
-    return {f"C{n}_result": globals()[f"verify_c{n}_fourier_subset" if n == 1 else
+    base = {f"C{n}_result": globals()[f"verify_c{n}_fourier_subset" if n == 1 else
                f"verify_c{n}_tau_invariance" if n == 2 else
                f"verify_c{n}_w_entropy" if n == 3 else
                f"verify_c{n}_rank_separability" if n == 4 else
@@ -74,6 +74,55 @@ def run_verification_suite() -> dict:
                f"verify_c{n}_monodromy_classification" if n == 6 else
                f"verify_c{n}_hessian_sparsity" if n == 7 else
                f"verify_c{n}_universal_embedding"]() for n in range(1, 9)}
+    base.update({
+        "G1_exceptional_point": verify_g1_exceptional_point(),
+        "G2_biorthogonal_hf": verify_g2_biorthogonal_hf(),
+        "G3_pde_convergence": verify_g3_pde_convergence(),
+        "G4_second_order_inverse": verify_g4_second_order_inverse(),
+    })
+    return base
+
+
+def verify_g1_exceptional_point() -> bool:
+    """G1: non-Hermitian EP has half-integer gap winding."""
+    from . import physics, topology
+    fam = physics.exceptional_point_2x2().family()
+    loop = [np.array([0.25 * np.cos(t), 0.25 * np.sin(t)]) for t in np.linspace(0, 2 * np.pi, 80)]
+    winding = topology.eigenvalue_winding(fam, loop)
+    return abs(abs(winding) - 0.5) < 0.1
+
+
+def verify_g2_biorthogonal_hf() -> bool:
+    """G2: non-Hermitian biorthogonal HF matches finite differences."""
+    from . import physics
+    fam = physics.pt_symmetric_2x2(0.3).family()
+    eps = 1e-6
+    fd = (fam.spectrum(np.array([eps, 0.0])) - fam.lam0) / eps
+    return np.max(np.abs(fd - fam.W[:, 0])) < 1e-5
+
+
+def verify_g3_pde_convergence() -> float:
+    """G3: sparse PDE first eigenvalue converges at ~second order."""
+    from . import physics
+    continuum = 0.5 * np.pi ** 2
+    rows = []
+    for n in [24, 48, 96]:
+        x = np.linspace(0.0, 1.0, n + 2)[1:-1]
+        fam = physics.schrodinger_1d(x, np.zeros_like(x), max_potential_params=4).family()
+        err = abs(float(fam.spectrum(np.zeros(fam.M), n_eigs=2)[0]) - continuum)
+        rows.append((1.0 / (n + 1), err))
+    h = np.array([r[0] for r in rows])
+    e = np.maximum(np.array([r[1] for r in rows]), 1e-15)
+    return float(np.polyfit(np.log(h), np.log(e), 1)[0])
+
+
+def verify_g4_second_order_inverse() -> dict:
+    """G4: Hessian/trust inverse returns diagnostics and finite residuals."""
+    from .families import random
+    fam = random(10, 3, seed=31)
+    target = np.sort(fam.lam0 + np.linspace(-0.02, 0.02, fam.N))
+    result = fam.inverse(target, steps=2, alpha=0.25, method="hessian")
+    return {"finite": bool(np.isfinite(result.error)), "hessian_count": result.hessian_count}
 
 
 def verify_s1_complexity() -> bool:

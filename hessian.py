@@ -55,10 +55,13 @@ def hessian_analytic(family: OperatorFamily, k0: np.ndarray | None = None) -> np
     N, M = family.N, family.M
     if M == 0:
         return np.zeros((N, 0, 0))
-    Bstack = family._basis_stack
-    if Bstack.shape[0] == 0 and M > 0:
-        Bstack = np.stack(family.basis)
-    VBV = vecs.T @ Bstack @ vecs
+    if hasattr(family._basis_backend, "eigen_tensor"):
+        VBV = family._basis_backend.eigen_tensor(vecs)
+    else:
+        Bstack = family._basis_stack
+        if Bstack.shape[0] == 0 and M > 0:
+            Bstack = np.stack(family.basis)
+        VBV = vecs.T @ Bstack @ vecs
     denom = lam[:, None] - lam[None, :]
     denom[np.abs(denom) < 1e-12] = np.inf
     gap_inv = 1.0 / denom; np.fill_diagonal(gap_inv, 0.0)

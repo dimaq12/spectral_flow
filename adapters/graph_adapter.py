@@ -1,6 +1,7 @@
 from .base import BaseAdapter
 from ..core import OperatorFamily, edge_laplacian_basis
 import numpy as np
+from scipy import sparse
 
 
 class GraphAdapter(BaseAdapter):
@@ -21,7 +22,8 @@ class GraphAdapter(BaseAdapter):
     """
 
     def __init__(self, adjacency: np.ndarray):
-        self.adjacency = np.asarray(adjacency, dtype=np.float64)
+        self._adjacency_sparse = sparse.issparse(adjacency)
+        self.adjacency = adjacency.tocsr().astype(np.float64) if self._adjacency_sparse else np.asarray(adjacency, dtype=np.float64)
         if self.adjacency.shape[0] != self.adjacency.shape[1]:
             raise ValueError("Adjacency must be square")
         self.n_nodes = self.adjacency.shape[0]
@@ -29,12 +31,19 @@ class GraphAdapter(BaseAdapter):
 
     def _build(self):
         N = self.n_nodes
-        row, col = np.triu(self.adjacency != 0, 1).nonzero()
+        if self._adjacency_sparse:
+            row, col = sparse.triu(self.adjacency != 0, 1).nonzero()
+        else:
+            row, col = np.triu(self.adjacency != 0, 1).nonzero()
         edges = list(zip(row.tolist(), col.tolist()))
         self.n_edges = len(edges)
 
-        D = np.diag(np.sum(self.adjacency, axis=1))
-        A0 = D - self.adjacency
+        degree = np.asarray(self.adjacency.sum(axis=1)).ravel() if self._adjacency_sparse else np.sum(self.adjacency, axis=1)
+        if self._adjacency_sparse or N > 2048:
+            A0 = sparse.diags(degree) - (self.adjacency if self._adjacency_sparse else sparse.csr_matrix(self.adjacency))
+        else:
+            D = np.diag(degree)
+            A0 = D - self.adjacency
         self._family = OperatorFamily(A0, edge_laplacian_basis(N, edges))
 
     @property

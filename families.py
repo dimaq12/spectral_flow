@@ -15,6 +15,7 @@ sft.families — Pre-built operator families: random, graph, Toeplitz, etc.
 from __future__ import annotations
 import numpy as np
 from scipy import linalg
+from scipy import sparse
 from .core import OperatorFamily, edge_laplacian_basis, repeated_identity_basis
 
 __all__ = ["random", "graph_laplacian", "toeplitz", "diagonal", "avoided_crossing_2x2"]
@@ -33,14 +34,24 @@ def random(N: int, M: int, seed: int = 0, sparsity: float = 1.0) -> OperatorFami
 
 def graph_laplacian(adjacency: np.ndarray) -> OperatorFamily:
     """Graph Laplacian family.  Parameters: edge weights.  A0 = D − A (unweighted Laplacian)."""
-    adjacency = np.asarray(adjacency, dtype=np.float64)
+    is_sp = sparse.issparse(adjacency)
+    adjacency = adjacency.tocsr().astype(np.float64) if is_sp else np.asarray(adjacency, dtype=np.float64)
     if adjacency.ndim != 2 or adjacency.shape[0] != adjacency.shape[1]:
         raise ValueError(f"adjacency must be square, got {adjacency.shape}")
     N = adjacency.shape[0]
-    row, col = np.triu(adjacency, 1).nonzero()
+    if is_sp:
+        row, col = sparse.triu(adjacency, 1).nonzero()
+    else:
+        row, col = np.triu(adjacency, 1).nonzero()
     edges = list(zip(row.tolist(), col.tolist()))
-    D = np.diag(np.sum(adjacency, axis=1))
-    return OperatorFamily(D - adjacency, edge_laplacian_basis(N, edges))
+    degree = np.asarray(adjacency.sum(axis=1)).ravel() if is_sp else np.sum(adjacency, axis=1)
+    if is_sp or N > 2048:
+        A_sp = adjacency if is_sp else sparse.csr_matrix(adjacency)
+        L0 = sparse.diags(degree) - A_sp
+    else:
+        D = np.diag(degree)
+        L0 = D - adjacency
+    return OperatorFamily(L0, edge_laplacian_basis(N, edges))
 
 
 def toeplitz(N: int, diagonals: int = 5, seed: int = 0) -> OperatorFamily:

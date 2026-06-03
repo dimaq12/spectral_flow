@@ -125,6 +125,35 @@ sft.solve(fam, target_spectrum)    # inverse design
 sft.sort(values)                   # CDF/ORDER helper
 sft.filter(signal, keep_low=8)     # DCT helper
 sft.cluster_data(points)           # spectral clustering helper
+
+# Fast 0.2-style spectral operations
+lam16 = fam.spectrum(np.zeros(fam.M), n_eigs=16)  # partial spectrum
+fit16 = fam.inverse(lam16, n_eigs=16)              # inverse on selected modes
+many = fam.predict_many(np.zeros((1000, fam.M)))  # batched W @ dk
+
+# Operator-math fluent API
+fam.refresh(np.zeros(fam.M))
+lam = fam.at(0.01 * np.ones(fam.M))
+result = fam.toward(target_spectrum).regularized(1e-4)
+
+A = sft.families.random(20, 4)
+B = sft.families.random(10, 2)
+AB = A + B                 # direct sum
+compressed = A @ np.eye(4, 2)
+predicted = A @ np.zeros(4)
+
+# 0.3 Spectral Geometry Lab
+ep = sft.physics.exceptional_point_2x2().family()
+loop = [
+    np.array([0.25 * np.cos(t), 0.25 * np.sin(t)])
+    for t in np.linspace(0, 2 * np.pi, 80)
+]
+summary = sft.topology.complex_monodromy(ep, loop)
+atlas = sft.topology.exceptional_point_atlas(ep)
+
+x = np.linspace(0.0, 1.0, 66)[1:-1]
+sch = sft.physics.schrodinger_1d(x, np.zeros_like(x)).family()
+low_modes = sch.spectrum(np.zeros(sch.M), n_eigs=8)
 ```
 
 ### Pick the right entry point
@@ -136,6 +165,10 @@ sft.cluster_data(points)           # spectral clustering helper
 | Raw domain data | `sft.audio`, `sft.image`, `sft.text`, ... | A ready-to-query adapter |
 | A task string and data | `sft.from_task(...)` or `sft.solve(...)` | High-level routing into SFT |
 | A target spectrum | `fam.inverse(target)` | Parameters plus diagnostics |
+| A large sparse operator | `fam.spectrum(k, n_eigs=K)` | Only the modes you asked for |
+| A clean fluent chain | `fam.refresh(k0).at(k1)` | Operator-math readable code |
+| A non-Hermitian Hamiltonian | `OperatorFamily(..., hermitian=False)` | Biorthogonal `W` and complex topology |
+| A PDE/quantum model | `sft.physics.schrodinger_1d(...)` | Sparse operator family from physical data |
 
 ---
 
@@ -176,7 +209,7 @@ tab = sft.tabular(data, feature_groups=feature_groups)
 m   = sft.mesh(vertices, faces)                            # mesh -> Laplace-Beltrami
 ```
 
-**Every adapter exposes the same interface:** `.kernel`, `.predict()`, `.inverse()`, `.rank`, `.complexity`, `.reference_spectrum`. The old `.spectrum` alias still works.
+**Every adapter exposes the same interface:** `.kernel`, `.predict()`, `.predict_at()`, `.refresh()`, `.at()`, `.toward()`, `.inverse()`, `.rank`, `.complexity`, `.reference_spectrum`. The old `.spectrum` alias still works.
 
 ---
 
@@ -431,7 +464,7 @@ for f in sft/examples/demo_*.py; do python3 "$f"; done
 
 | Demo | What it shows | Key result | Full report |
 |------|--------------|------------|-------------|
-| **Scale benchmark** | N=50..500, build/predict/inverse timing | N=500 predict in 85us; graph avoids ~306MB dense basis | [`md`](examples/reports/benchmark_scale.md) |
+| **Scale benchmark** | N=50..500, predict_many, sparse/physics partial spectrum | N=500 predict in 85us; predict×1000 in 12.7ms; sparse K=16 in 170ms | [`md`](examples/reports/benchmark_scale.md) |
 | **Adapter load test** | All 12 adapters in one run | Max build 461ms across all domains | [`md`](examples/reports/benchmark_adapters.md) |
 | **Cosmic dynamics** | Gravitational N-body Jacobian | complexity=0.20, build 20ms | [`md`](examples/reports/cosmic_dynamics.md) |
 | **PDE spectroscopy** | Defect α-recovery across distributions | Normal α=1.22, Cauchy α=1.42 | [`md`](examples/reports/pde_spectroscopy.md) |
@@ -441,8 +474,11 @@ for f in sft/examples/demo_*.py; do python3 "$f"; done
 | **Graph operator** | O(1) bridge/articulation queries | V=5000, build 67ms | [`md`](examples/reports/graph_operator.md) |
 | **Spectral codec** | W·dk encode, W⁺·y decode | Roundtrip **1.0e-15** | [`md`](examples/reports/spectral_codec.md) |
 | **Spectral topology** | Berry holonomy + monodromy | Holonomy = **-1**, monodromy 3ms | [`md`](examples/reports/spectral_topology.md) |
+| **Quantum EP** | Non-Hermitian square-root exceptional point | Gap winding ≈ **0.5**, EP atlas min gap 0 | [`md`](examples/reports/quantum_exceptional_point.md) |
+| **PDE multigrid** | Sparse Schrödinger operator across grids | Convergence slope ≈ **2.0** | [`md`](examples/reports/pde_multigrid.md) |
+| **Inverse graph design** | Recover edge weights from target low spectrum | Low-mode spectral error ~1e-3..1e-2 | [`md`](examples/reports/inverse_graph_design.md) |
 
-**One kernel. 10 demos. All runnable. Built on W.**
+**One kernel. Geometry, topology, inverse design, and physics demos. All runnable. Built on W.**
 
 ---
 
@@ -460,4 +496,16 @@ pip install spectral-flow
 
 ## License
 
-MIT — Dmitry Sierikov, 2026.
+SFT Permissive Attribution License — you can use, copy, modify, publish,
+distribute, sublicense, and sell the software, including in commercial and
+proprietary products.
+
+Required attribution must keep the author name and link:
+
+```text
+Spectral Flow Transform (SFT)
+Copyright (c) 2026 Dmitry Sierikov
+https://github.com/dimaq12/spectral_flow
+```
+
+See [`LICENSE`](LICENSE) for the full terms.

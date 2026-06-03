@@ -106,6 +106,11 @@ def route_and_solve(problem: str, data: np.ndarray):
     return data
 
 
+def task(problem: str, data: np.ndarray):
+    """Alias for route_and_solve, useful in fluent examples."""
+    return route_and_solve(problem, data)
+
+
 def cluster_via_laplacian(x: np.ndarray, sigma: float | None = None) -> np.ndarray:
     """Spectral clustering: Gaussian affinity → Laplacian → Fiedler → binary labels."""
     x = np.asarray(x, np.float64)
@@ -137,6 +142,11 @@ def hash_injective_map(keys: np.ndarray) -> np.ndarray:
 def compose_tasks(task1_name: str, task2_name: str, data: np.ndarray):
     """Pipeline: task1(data) → task2(result)."""
     return route_and_solve(task2_name, route_and_solve(task1_name, data))
+
+
+def pipe(task1_name: str, task2_name: str, data: np.ndarray):
+    """Alias for compose_tasks."""
+    return compose_tasks(task1_name, task2_name, data)
 
 
 def diagnose_mismatch(problem: str, data: np.ndarray) -> dict:

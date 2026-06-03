@@ -64,6 +64,7 @@ sft.core — Spectral Flow Transform: kernel, prediction, inverse design.
 from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional, Tuple
+import time
 import warnings
 import numpy as np
 from scipy import linalg, sparse
@@ -86,6 +87,15 @@ class KernelState:
     singular: np.ndarray
 
 
+@dataclass(frozen=True)
+class BiorthogonalState:
+    """Non-Hermitian spectral reference with <L_i|R_j> = delta_ij."""
+    k_ref: np.ndarray
+    lam: np.ndarray
+    left_vecs: np.ndarray
+    right_vecs: np.ndarray
+
+
 class InverseResult(tuple):
     """Backward-compatible inverse result.
 
@@ -95,11 +105,21 @@ class InverseResult(tuple):
 
     def __new__(cls, k: np.ndarray, error: float, converged: bool,
                 steps: int = 0, n_refresh: int = 0,
-                condition_number: float = np.inf):
+                condition_number: float = np.inf,
+                eigh_count: int = 0, time_ms: float = 0.0,
+                method: str = "linear", trajectory: np.ndarray | None = None,
+                residual_history: np.ndarray | None = None,
+                hessian_count: int = 0):
         obj = super().__new__(cls, (k, error, converged))
         obj.steps = int(steps)
         obj.n_refresh = int(n_refresh)
         obj.condition_number = float(condition_number)
+        obj.eigh_count = int(eigh_count)
+        obj.time_ms = float(time_ms)
+        obj.method = str(method)
+        obj.trajectory = trajectory
+        obj.residual_history = residual_history
+        obj.hessian_count = int(hessian_count)
         return obj
 
     @property
@@ -114,6 +134,18 @@ class InverseResult(tuple):
     def converged(self) -> bool:
         return self[2]
 
+    def regularized(self, reg: float = 1e-6) -> "InverseResult":
+        """Fluent no-op annotation for APIs that chain solver options."""
+        obj = InverseResult(self.k, self.error, self.converged,
+                            steps=self.steps, n_refresh=self.n_refresh,
+                            condition_number=self.condition_number,
+                            eigh_count=self.eigh_count, time_ms=self.time_ms,
+                            method=self.method, trajectory=self.trajectory,
+                            residual_history=self.residual_history,
+                            hessian_count=self.hessian_count)
+        obj.reg = float(reg)
+        return obj
+
 
 class _DenseBasisBackend:
     kind = "dense"
@@ -122,12 +154,14 @@ class _DenseBasisBackend:
         self.N = N
         self.M = len(basis)
         self._basis_list = [
-            B.toarray() if _is_sparse(B) else np.asarray(B, dtype=np.float64).copy()
+            B.toarray() if _is_sparse(B) else np.asarray(B).copy()
             for B in basis
         ]
         for idx, B in enumerate(self._basis_list):
             if B.shape != (self.N, self.N):
                 raise ValueError(f"basis[{idx}] must have shape ({self.N}, {self.N}), got {B.shape}")
+            if not np.all(np.isfinite(B)):
+                raise ValueError(f"basis[{idx}] contains NaN or Inf")
         self.stack = (
             np.stack(self._basis_list)
             if self.M > 0
@@ -144,23 +178,79 @@ class _DenseBasisBackend:
 
     def build_delta(self, k: np.ndarray) -> np.ndarray:
         if self.M == 0:
-            return np.zeros((self.N, self.N))
+            return np.zeros((self.N, self.N), dtype=self.stack.dtype)
         return np.tensordot(k, self.stack, axes=((0,), (0,)))
+
+    def build_delta_sparse(self, k: np.ndarray):
+        return sparse.csc_matrix(self.build_delta(k))
 
     def kernel(self, V: np.ndarray, batch_limit: int) -> np.ndarray:
         if self.M == 0:
-            return np.empty((V.shape[0], 0))
+            return np.empty((V.shape[1], 0))
         elements_per_basis = self.N * self.N
         batch_M = max(1, batch_limit // max(elements_per_basis, 1))
         if self.M <= batch_M:
             BsV = self.stack @ V
-            return np.einsum('ni,mni->im', V, BsV)
-        W = np.empty((V.shape[0], self.M))
+            return np.einsum('ni,mni->im', np.conjugate(V), BsV)
+        W = np.empty((V.shape[1], self.M), dtype=np.result_type(V, self.stack))
         for b in range(0, self.M, batch_M):
             be = min(b + batch_M, self.M)
             BsV_b = self.stack[b:be] @ V
-            W[:, b:be] = np.einsum('ni,mni->im', V, BsV_b)
+            W[:, b:be] = np.einsum('ni,mni->im', np.conjugate(V), BsV_b)
         return W
+
+    def eigen_tensor(self, V: np.ndarray) -> np.ndarray:
+        return V.conj().T @ self.stack @ V
+
+
+class _SparseBasisBackend:
+    kind = "sparse"
+
+    def __init__(self, basis: list, N: int):
+        self.N = N
+        self.M = len(basis)
+        self._basis_sparse = [B.tocsc() for B in basis]
+        for idx, B in enumerate(self._basis_sparse):
+            if B.shape != (self.N, self.N):
+                raise ValueError(f"basis[{idx}] must have shape ({self.N}, {self.N}), got {B.shape}")
+            if not np.all(np.isfinite(B.data)):
+                raise ValueError(f"basis[{idx}] contains NaN or Inf")
+        self._basis_list: list[np.ndarray] | None = None
+
+    @property
+    def basis(self) -> list[np.ndarray]:
+        if self._basis_list is None:
+            self._basis_list = [B.toarray() for B in self._basis_sparse]
+        return self._basis_list
+
+    @property
+    def materialized_elements(self) -> int:
+        return sum(B.nnz for B in self._basis_sparse)
+
+    def build_delta(self, k: np.ndarray):
+        return self.build_delta_sparse(k).toarray()
+
+    def build_delta_sparse(self, k: np.ndarray):
+        result = sparse.csc_matrix((self.N, self.N))
+        for weight, B in zip(k, self._basis_sparse):
+            if weight != 0:
+                result = result + weight * B
+        return result
+
+    def kernel(self, V: np.ndarray, batch_limit: int) -> np.ndarray:
+        if self.M == 0:
+            return np.empty((V.shape[1], 0))
+        W = np.empty((V.shape[1], self.M), dtype=np.result_type(V, complex if np.iscomplexobj(V) else float))
+        for j, B in enumerate(self._basis_sparse):
+            BV = B @ V
+            W[:, j] = np.einsum('ni,ni->i', np.conjugate(V), BV)
+        return W
+
+    def eigen_tensor(self, V: np.ndarray) -> np.ndarray:
+        out = np.empty((self.M, V.shape[1], V.shape[1]), dtype=np.result_type(V, complex))
+        for j, B in enumerate(self._basis_sparse):
+            out[j] = V.conj().T @ (B @ V)
+        return out
 
 
 class _EdgeLaplacianBasisBackend:
@@ -204,11 +294,25 @@ class _EdgeLaplacianBasisBackend:
             L[v, u] -= weight
         return L
 
+    def build_delta_sparse(self, k: np.ndarray):
+        if self.M == 0:
+            return sparse.csc_matrix((self.N, self.N))
+        row = np.concatenate([self._u, self._v, self._u, self._v])
+        col = np.concatenate([self._u, self._v, self._v, self._u])
+        data = np.concatenate([k, k, -k, -k])
+        return sparse.coo_matrix((data, (row, col)), shape=(self.N, self.N)).tocsc()
+
     def kernel(self, V: np.ndarray, batch_limit: int) -> np.ndarray:
         if self.M == 0:
-            return np.empty((V.shape[0], 0))
+            return np.empty((V.shape[1], 0))
         diff = V[self._u, :] - V[self._v, :]
         return diff.T ** 2
+
+    def eigen_tensor(self, V: np.ndarray) -> np.ndarray:
+        if self.M == 0:
+            return np.empty((0, V.shape[1], V.shape[1]))
+        diff = V[self._u, :] - V[self._v, :]
+        return diff[:, :, None] * diff[:, None, :]
 
 
 def edge_laplacian_basis(N: int, edges: list[tuple[int, int]]) -> _EdgeLaplacianBasisBackend:
@@ -242,8 +346,16 @@ class _CoordinateDiagonalBasisBackend:
         D[idx, idx] = k
         return D
 
+    def build_delta_sparse(self, k: np.ndarray):
+        idx = np.arange(self.M)
+        return sparse.coo_matrix((k, (idx, idx)), shape=(self.N, self.N)).tocsc()
+
     def kernel(self, V: np.ndarray, batch_limit: int) -> np.ndarray:
         return V[:self.M, :].T ** 2
+
+    def eigen_tensor(self, V: np.ndarray) -> np.ndarray:
+        rows = V[:self.M, :]
+        return rows[:, :, None] * rows[:, None, :]
 
 
 def coordinate_diagonal_basis(N: int, M: int | None = None) -> _CoordinateDiagonalBasisBackend:
@@ -275,8 +387,15 @@ class _RepeatedIdentityBasisBackend:
     def build_delta(self, k: np.ndarray) -> np.ndarray:
         return np.eye(self.N) * float(np.sum(k))
 
+    def build_delta_sparse(self, k: np.ndarray):
+        return sparse.eye(self.N, format="csc") * float(np.sum(k))
+
     def kernel(self, V: np.ndarray, batch_limit: int) -> np.ndarray:
-        return np.ones((V.shape[0], self.M))
+        return np.ones((V.shape[1], self.M))
+
+    def eigen_tensor(self, V: np.ndarray) -> np.ndarray:
+        eye = np.eye(V.shape[1])
+        return np.repeat(eye[None, :, :], self.M, axis=0)
 
 
 def repeated_identity_basis(N: int, M: int | None = None) -> _RepeatedIdentityBasisBackend:
@@ -310,7 +429,7 @@ def repeated_identity_basis(N: int, M: int | None = None) -> _RepeatedIdentityBa
 class OperatorFamily:
     def __init__(self, A0: np.ndarray, basis: list[np.ndarray],
                  svd_tol: float = 1e-8, convergence_tol: float = 1e-2,
-                 k_eigs: int | None = None):
+                 k_eigs: int | None = None, hermitian: bool = True):
         """
         CONTRACT:
             PRE:  A0.shape == (N,N), all B in basis have shape (N,N)
@@ -318,12 +437,20 @@ class OperatorFamily:
             POST: self.W is computed via eigh+SVD (cached)
             POST: self._k0_ref = zeros(M)  — reference parameter vector
         """
+        self.hermitian = bool(hermitian)
         self._sparse_mode = _is_sparse(A0)
+        if self._sparse_mode:
+            if not np.all(np.isfinite(A0.data)):
+                raise ValueError("A0 contains NaN or Inf")
+        elif not np.all(np.isfinite(np.asarray(A0))):
+            raise ValueError("A0 contains NaN or Inf")
         self.N = A0.shape[0]
         if A0.shape[0] != A0.shape[1]:
             raise ValueError(f"A0 must be a square matrix, got {A0.shape}")
         if hasattr(basis, "build_delta") and hasattr(basis, "kernel"):
             self._basis_backend = basis
+        elif self._sparse_mode and isinstance(basis, list) and all(_is_sparse(B) for B in basis):
+            self._basis_backend = _SparseBasisBackend(basis, self.N)
         else:
             self._basis_backend = _DenseBasisBackend(basis, self.N)
         self.M = self._basis_backend.M
@@ -332,13 +459,15 @@ class OperatorFamily:
         self.k_eigs = k_eigs or min(self.N, 128)
         self._stale = False
         self._k0_ref = np.zeros(self.M)
+        self._eigh_count = 0
 
         if self._sparse_mode:
             self.A0_sparse = A0.tocsc()
-            self.A0 = self.A0_sparse.toarray()
+            self.A0 = self.A0_sparse if self.N > 2048 else self.A0_sparse.toarray()
             self._basis_sparse = [B.tocsc() for B in basis] if isinstance(basis, list) and self.M > 0 else []
         else:
-            self.A0 = np.asarray(A0, dtype=np.float64).copy()
+            dtype = np.float64 if self.hermitian and not np.iscomplexobj(A0) else np.complex128
+            self.A0 = np.asarray(A0, dtype=dtype).copy()
             self.A0_sparse = None
             self._basis_sparse = []
         self._basis_list = self._basis_backend.basis if self._basis_backend.kind == "dense" else []
@@ -356,9 +485,11 @@ class OperatorFamily:
         self._Wp: Optional[np.ndarray] = None
         self._W_rank: Optional[int] = None
         self._W_singular: Optional[np.ndarray] = None
+        self._left_vecs: Optional[np.ndarray] = None
         self._reference_state: Optional[ReferenceState] = None
+        self._biorthogonal_state: Optional[BiorthogonalState] = None
         self._kernel_state: Optional[KernelState] = None
-        self.set_reference(self.A0, k0=np.zeros(self.M))
+        self.set_reference(self.A0_sparse if self._sparse_mode else self.A0, k0=np.zeros(self.M))
 
     @property
     def basis(self) -> list[np.ndarray]:
@@ -388,19 +519,25 @@ class OperatorFamily:
         arr = np.asarray(k, dtype=np.float64).ravel()
         if arr.shape != (self.M,):
             raise ValueError(f"{name} must have shape ({self.M},), got {arr.shape}")
+        if not np.all(np.isfinite(arr)):
+            raise ValueError(f"{name} contains NaN or Inf")
         return arr
 
     def _check_target(self, target: np.ndarray) -> np.ndarray:
-        arr = np.asarray(target, dtype=np.float64).ravel()
-        if arr.size < self.N:
-            raise ValueError(f"target_lam must contain at least {self.N} values, got {arr.size}")
-        if arr.size > self.N:
+        dtype = np.float64 if self.hermitian and not np.iscomplexobj(target) else np.complex128
+        arr = np.asarray(target, dtype=dtype).ravel()
+        active_n = len(self._lam0) if self._lam0 is not None else self.N
+        if not np.all(np.isfinite(arr)):
+            raise ValueError("target_lam contains NaN or Inf")
+        if arr.size < active_n:
+            raise ValueError(f"target_lam must contain at least {active_n} values, got {arr.size}")
+        if arr.size > active_n:
             warnings.warn(
-                f"target_lam has {arr.size} values; using the first {self.N}.",
+                f"target_lam has {arr.size} values; using the first {active_n}.",
                 UserWarning,
                 stacklevel=2,
             )
-            arr = arr[:self.N]
+            arr = arr[:active_n]
         return arr
 
     # ──────────────────────────────────────────
@@ -418,12 +555,25 @@ class OperatorFamily:
             self._last_build_key == k_tuple):
             return self._last_build_result
         if self.M == 0:
-            result = self.A0.copy()
+            result = self.A0.copy() if hasattr(self.A0, "copy") else self.A0
         else:
             result = self.A0 + self._basis_backend.build_delta(k)
         self._last_build_key = k_tuple
         self._last_build_result = result
         return result
+
+    def build_sparse(self, k: np.ndarray):
+        """Build A(k) as a sparse CSC matrix when possible."""
+        k = self._check_k(k)
+        if self._sparse_mode:
+            base = self.A0_sparse
+        else:
+            base = sparse.csc_matrix(self.A0)
+        if self.M == 0:
+            return base.copy()
+        if hasattr(self._basis_backend, "build_delta_sparse"):
+            return base + self._basis_backend.build_delta_sparse(k)
+        return base + sparse.csc_matrix(self._basis_backend.build_delta(k))
 
     # ──────────────────────────────────────────
     #  _eigh(A)
@@ -432,13 +582,73 @@ class OperatorFamily:
     #    POST: returns (lam, vecs) sorted ascending
     #    PERF: uses sparse eigsh when input was sparse + N>k_eigs
     # ──────────────────────────────────────────
-    def _eigh(self, A: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-        if self._sparse_mode and self.N > self.k_eigs:
+    def _eigh(self, A: np.ndarray, n_eigs: int | None = None,
+              which: str = "SM") -> tuple[np.ndarray, np.ndarray]:
+        self._eigh_count += 1
+        sparse_input = _is_sparse(A)
+        if sparse_input:
+            N = A.shape[0]
+        else:
+            A = np.asarray(A)
+            N = A.shape[0]
+            if not np.all(np.isfinite(A)):
+                raise ValueError("operator matrix contains NaN or Inf")
+        k = n_eigs if n_eigs is not None else (self.k_eigs if sparse_input and N > self.k_eigs else None)
+        if sparse_input and k is not None and 0 < k < N:
             try:
-                return sparse.linalg.eigsh(A, k=self.k_eigs, which='SM')
+                lam, vecs = sparse.linalg.eigsh(A, k=k, which=which)
+                idx = np.argsort(lam)
+                return lam[idx], vecs[:, idx]
             except (sparse.linalg.ArpackError, Exception):
                 warnings.warn("sparse eigsh failed; falling back to dense eigh", RuntimeWarning, stacklevel=2)
+        if sparse_input:
+            A = A.toarray()
+        if k is not None and 0 < k < N:
+            lam, vecs = linalg.eigh(A, subset_by_index=(0, k - 1))
+            return lam, vecs
         return linalg.eigh(A)
+
+    @staticmethod
+    def _sort_complex(lam: np.ndarray, *vecs: np.ndarray):
+        idx = np.lexsort((np.imag(lam), np.real(lam)))
+        sorted_vecs = tuple(v[:, idx] for v in vecs)
+        return (lam[idx], *sorted_vecs)
+
+    def _eig_biorthogonal(self, A: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        self._eigh_count += 1
+        if _is_sparse(A):
+            A = A.toarray()
+        A = np.asarray(A, dtype=np.complex128)
+        if not np.all(np.isfinite(A)):
+            raise ValueError("operator matrix contains NaN or Inf")
+        lam, VL, VR = linalg.eig(A, left=True, right=True)
+        lam, VL, VR = self._sort_complex(lam, VL, VR)
+        for i in range(VR.shape[1]):
+            overlap = np.vdot(VL[:, i], VR[:, i])
+            if abs(overlap) > 1e-14:
+                VL[:, i] = VL[:, i] / np.conj(overlap)
+        return lam, VL, VR
+
+    def _biorthogonal_kernel(self, VL: np.ndarray, VR: np.ndarray) -> np.ndarray:
+        if self.M == 0:
+            return np.empty((VR.shape[1], 0), dtype=np.complex128)
+        W = np.empty((VR.shape[1], self.M), dtype=np.complex128)
+        for j, B in enumerate(self.basis):
+            BR = B @ VR
+            W[:, j] = np.einsum("ni,ni->i", np.conjugate(VL), BR)
+        return W
+
+    def eigensystem(self, k: np.ndarray | None = None, n_eigs: int | None = None,
+                    which: str = "SM") -> tuple[np.ndarray, np.ndarray]:
+        """Exact eigenvalues/eigenvectors for A(k), optionally partial."""
+        k_vec = np.zeros(self.M) if k is None else self._check_k(k)
+        A = self.build_sparse(k_vec) if (self._sparse_mode or n_eigs is not None) else self.build(k_vec)
+        if not self.hermitian:
+            lam, _, VR = self._eig_biorthogonal(A)
+            if n_eigs is not None:
+                return lam[:n_eigs], VR[:, :n_eigs]
+            return lam, VR
+        return self._eigh(A, n_eigs=n_eigs, which=which)
 
     # ──────────────────────────────────────────
     #  invalidate_cache()
@@ -459,16 +669,28 @@ class OperatorFamily:
     #    POST: _k0_ref ← k0 if provided
     #    PERF: batched einsum when M > BATCH_LIMIT/N²
     # ──────────────────────────────────────────
-    def set_reference(self, A_ref: np.ndarray, k0: np.ndarray | None = None) -> 'OperatorFamily':
-        self._lam0, self._vecs = self._eigh(A_ref)
+    def set_reference(self, A_ref: np.ndarray, k0: np.ndarray | None = None,
+                      n_eigs: int | None = None, which: str = "SM") -> 'OperatorFamily':
+        if self.hermitian:
+            self._lam0, self._vecs = self._eigh(A_ref, n_eigs=n_eigs, which=which)
+            self._left_vecs = None
+        else:
+            self._lam0, self._left_vecs, self._vecs = self._eig_biorthogonal(A_ref)
+            if n_eigs is not None:
+                self._lam0 = self._lam0[:n_eigs]
+                self._left_vecs = self._left_vecs[:, :n_eigs]
+                self._vecs = self._vecs[:, :n_eigs]
         self._last_build_key = None
         self._last_build_result = None
         V = self._vecs
         if self.M == 0:
-            self._W = np.empty((len(self._lam0), 0))
-        else:
+            dtype = np.float64 if self.hermitian else np.complex128
+            self._W = np.empty((len(self._lam0), 0), dtype=dtype)
+        elif self.hermitian:
             BATCH_LIMIT = 5_000_000
             self._W = self._basis_backend.kernel(V, BATCH_LIMIT)
+        else:
+            self._W = self._biorthogonal_kernel(self._left_vecs, V)
         if k0 is not None:
             self._k0_ref = self._check_k(k0, "k0").copy()
         U, s, Vt = linalg.svd(self._W, full_matrices=False)
@@ -476,11 +698,17 @@ class OperatorFamily:
         self._W_rank = int(np.sum(s > tol))
         r = max(self._W_rank, 1)
         if len(s) >= r and s[r - 1] > tol:
-            self._Wp = Vt[:r].T @ np.diag(1.0 / s[:r]) @ U[:, :r].T
+            self._Wp = Vt[:r].conj().T @ np.diag(1.0 / s[:r]) @ U[:, :r].conj().T
         else:
-            self._Wp = np.zeros((self.M, self.N))
+            self._Wp = np.zeros((self.M, self._W.shape[0]), dtype=self._W.dtype)
         self._W_singular = s
         self._reference_state = ReferenceState(self._k0_ref.copy(), self._lam0.copy(), self._vecs.copy())
+        self._biorthogonal_state = (
+            BiorthogonalState(self._k0_ref.copy(), self._lam0.copy(),
+                              self._left_vecs.copy(), self._vecs.copy())
+            if not self.hermitian and self._left_vecs is not None
+            else None
+        )
         self._kernel_state = KernelState(self._W.copy(), self._Wp.copy(), self._W_rank, self._W_singular.copy())
         return self
 
@@ -527,6 +755,24 @@ class OperatorFamily:
             self.set_reference(self.A0)
         return self._vecs  # type: ignore[return-value]
 
+    @property
+    def left_vecs(self) -> np.ndarray:
+        """Left eigenvectors for non-Hermitian families; equals vecs for Hermitian ones."""
+        if self.hermitian:
+            return self.vecs
+        if self._left_vecs is None:
+            self.set_reference(self.A0)
+        return self._left_vecs  # type: ignore[return-value]
+
+    @property
+    def biorthogonal_state(self) -> BiorthogonalState:
+        """Current non-Hermitian reference with normalized left/right eigenvectors."""
+        if self.hermitian:
+            raise AttributeError("biorthogonal_state is only available for hermitian=False families")
+        if self._biorthogonal_state is None or self._stale:
+            self.set_reference(self.A0, k0=np.zeros(self.M))
+        return self._biorthogonal_state  # type: ignore[return-value]
+
     # ──────────────────────────────────────────
     #  spectrum(k)
     #  CONTRACT:
@@ -534,8 +780,13 @@ class OperatorFamily:
     #    POST: returns exact λ(k) via eigh (sorted)
     #    O(N³) — expensive, use .predict() when approximation is OK
     # ──────────────────────────────────────────
-    def spectrum(self, k: np.ndarray) -> np.ndarray:
+    def spectrum(self, k: np.ndarray, n_eigs: int | None = None,
+                 which: str = "SM") -> np.ndarray:
         k = self._check_k(k)
+        if not self.hermitian:
+            return self.eigensystem(k, n_eigs=n_eigs, which=which)[0]
+        if n_eigs is not None:
+            return self.eigensystem(k, n_eigs=n_eigs, which=which)[0]
         return np.sort(self._eigh(self.build(k))[0])
 
     # ──────────────────────────────────────────
@@ -550,6 +801,24 @@ class OperatorFamily:
         dk = self._check_k(dk, "dk")
         return self.lam0 + self.W @ dk
 
+    def predict_many(self, DK: np.ndarray) -> np.ndarray:
+        """Vectorized first-order predictions for many parameter deltas."""
+        arr = np.asarray(DK, dtype=np.float64)
+        if arr.ndim == 1:
+            return self.predict(arr)
+        if arr.ndim != 2 or arr.shape[1] != self.M:
+            raise ValueError(f"DK must have shape (n, {self.M}), got {arr.shape}")
+        if not np.all(np.isfinite(arr)):
+            raise ValueError("DK contains NaN or Inf")
+        return self.lam0[None, :] + arr @ self.W.T
+
+    def _linear_inverse_step(self, residual: np.ndarray) -> np.ndarray:
+        if np.iscomplexobj(self.W) or np.iscomplexobj(residual):
+            A = np.vstack([self.W.real, self.W.imag])
+            b = np.concatenate([residual.real, residual.imag])
+            return linalg.lstsq(A, b)[0]
+        return self.W_pinv @ residual
+
     # ──────────────────────────────────────────
     #  predict_at(k)
     #  CONTRACT:
@@ -560,6 +829,46 @@ class OperatorFamily:
     def predict_at(self, k: np.ndarray) -> np.ndarray:
         k = self._check_k(k)
         return self.lam0 + self.W @ (k - self._k0_ref)
+
+    def refresh(self, k: np.ndarray) -> 'OperatorFamily':
+        """Move the spectral reference to A(k) and return self for chaining."""
+        k = self._check_k(k)
+        return self.set_reference(self.build_sparse(k) if self._sparse_mode else self.build(k), k0=k)
+
+    def at(self, k: np.ndarray) -> np.ndarray:
+        """Fluent alias for predict_at(k)."""
+        return self.predict_at(k)
+
+    def shift(self, dk: np.ndarray) -> np.ndarray:
+        """Fluent alias for predict(dk)."""
+        return self.predict(dk)
+
+    def toward(self, target_lam: np.ndarray, **kw) -> InverseResult:
+        """Fluent alias for inverse(target_lam, **kw)."""
+        return self.inverse(target_lam, **kw)
+
+    def flow(self, target_lam: np.ndarray) -> '_SpectralFlowBuilder':
+        """Create a fluent inverse/control builder."""
+        return _SpectralFlowBuilder(self, target_lam)
+
+    def solve(self, target_lam: np.ndarray, **kw) -> InverseResult:
+        """Fluent alias for inverse(target_lam, **kw)."""
+        return self.inverse(target_lam, **kw)
+
+    def __add__(self, other):
+        if not isinstance(other, OperatorFamily):
+            return NotImplemented
+        from . import algebra
+        return algebra.direct_sum(self, other)
+
+    def __matmul__(self, other):
+        arr = np.asarray(other, dtype=np.float64)
+        if arr.ndim == 1:
+            return self.predict(arr)
+        if arr.ndim == 2:
+            from . import algebra
+            return algebra.compose_linear(self, arr)
+        return NotImplemented
 
     # ──────────────────────────────────────────
     #  inverse(target_lam, steps, alpha, refresh_every)
@@ -574,25 +883,51 @@ class OperatorFamily:
     # ──────────────────────────────────────────
     def inverse(self, target_lam: np.ndarray,
                 steps: int = 20, alpha: float = 0.3,
-                refresh_every: int = 5) -> InverseResult:
-        target_lam = self._check_target(target_lam)
+                refresh_every: int = 5,
+                n_eigs: int | None = None,
+                which: str = "SM",
+                method: str = "linear") -> InverseResult:
+        if method not in {"linear", "hessian", "trust", "homotopy"}:
+            raise ValueError("method must be one of: linear, hessian, trust, homotopy")
+        if method == "homotopy":
+            from .homotopy import track_homotopy
+            result = track_homotopy(target_lam, n_steps=steps, family=self)
+            result.method = "homotopy"
+            return result
+        t0 = time.perf_counter()
+        eigh_start = self._eigh_count
         k = np.zeros(self.M)
-        self.set_reference(self.build(k), k0=k)
+        def _operator_for_solve(kvec: np.ndarray):
+            return self.build_sparse(kvec) if (self._sparse_mode or n_eigs is not None) else self.build(kvec)
+
+        self.set_reference(_operator_for_solve(k), k0=k, n_eigs=n_eigs, which=which)
         n_refresh = 1
+        target_lam = self._check_target(target_lam)
         best_err = np.inf
         prev_err = np.inf
         stagnation_count = 0
+        trajectory = [k.copy()]
+        residual_history = []
+        hessian_count = 0
         for step in range(steps):
-            lam = self.spectrum(k)
-            err = float(np.max(np.abs(lam - target_lam)))
+            lam = self.spectrum(k, n_eigs=n_eigs, which=which)
+            residual = target_lam - lam
+            err = float(np.max(np.abs(residual)))
+            residual_history.append(err)
             best_err = min(best_err, err)
             if err < self.convergence_tol:
                 return InverseResult(k, err, True, steps=step + 1,
                                      n_refresh=n_refresh,
-                                     condition_number=self.condition_number())
+                                     condition_number=self.condition_number(),
+                                     eigh_count=self._eigh_count - eigh_start,
+                                     time_ms=(time.perf_counter() - t0) * 1000,
+                                     method=method,
+                                     trajectory=np.array(trajectory),
+                                     residual_history=np.array(residual_history),
+                                     hessian_count=hessian_count)
             if step > 0 and (step % refresh_every == 0 or
                               (err > prev_err * 0.9 and stagnation_count >= 2)):
-                self.set_reference(self.build(k), k0=k)
+                self.set_reference(_operator_for_solve(k), k0=k, n_eigs=n_eigs, which=which)
                 n_refresh += 1
                 stagnation_count = 0
             if err >= prev_err * 0.95:
@@ -600,13 +935,43 @@ class OperatorFamily:
             else:
                 stagnation_count = 0
             prev_err = err
-            dk = alpha * (self.W_pinv @ (target_lam - lam))
+            dk0 = self._linear_inverse_step(residual)
+            if method in {"hessian", "trust"} and self.hermitian and self.M > 0:
+                from .hessian import hessian_analytic
+                H = hessian_analytic(self, k)
+                H = H[:len(residual)]
+                hessian_count += 1
+                if method == "trust":
+                    radius = max(0.25, 2.0 / np.sqrt(max(self.M, 1)))
+                    norm = np.linalg.norm(dk0)
+                    if norm > radius:
+                        dk0 = dk0 * (radius / norm)
+                best_err_step = np.inf
+                dk = alpha * dk0
+                for scale in (alpha, alpha * 0.5, alpha * 0.25, -alpha * 0.25):
+                    cand = scale * dk0
+                    quad = self.W @ cand + 0.5 * np.einsum("ijk,j,k->i", H, cand, cand)
+                    predicted_err = float(np.max(np.abs(residual - quad)))
+                    exact_err = float(np.max(np.abs(target_lam - self.spectrum(k + cand, n_eigs=n_eigs, which=which))))
+                    score = min(exact_err, predicted_err)
+                    if score < best_err_step:
+                        best_err_step = score
+                        dk = cand
+            else:
+                dk = alpha * dk0
             k += dk
-        lam = self.spectrum(k)
+            trajectory.append(k.copy())
+        lam = self.spectrum(k, n_eigs=n_eigs, which=which)
         final = float(np.max(np.abs(lam - target_lam)))
         return InverseResult(k, final, best_err < self.convergence_tol,
                              steps=steps, n_refresh=n_refresh,
-                             condition_number=self.condition_number())
+                             condition_number=self.condition_number(),
+                             eigh_count=self._eigh_count - eigh_start,
+                             time_ms=(time.perf_counter() - t0) * 1000,
+                             method=method,
+                             trajectory=np.array(trajectory),
+                             residual_history=np.array(residual_history),
+                             hessian_count=hessian_count)
 
     # ──────────────────────────────────────────
     #  condition_number()
@@ -633,6 +998,59 @@ class OperatorFamily:
     # ──────────────────────────────────────────
     def isospectral_dimension(self) -> int:
         return max(self.M - self.W_rank, 0)
+
+    def isospectral_flow(self, direction: np.ndarray | None = None,
+                         steps: int = 16, step_size: float = 0.1) -> dict[str, np.ndarray | float]:
+        """Walk along an approximate ker(W) direction and monitor spectral drift."""
+        Z = nullspace(self)
+        if Z.shape[1] == 0:
+            path = np.zeros((steps, self.M))
+        else:
+            if direction is None:
+                d = Z[:, 0]
+            else:
+                coeff = np.asarray(direction, dtype=np.float64).ravel()
+                if coeff.shape == (self.M,):
+                    d = Z @ (Z.T @ coeff)
+                elif coeff.shape == (Z.shape[1],):
+                    d = Z @ coeff
+                else:
+                    raise ValueError(f"direction must have shape ({self.M},) or ({Z.shape[1]},)")
+            d = d / max(np.linalg.norm(d), 1e-15)
+            alphas = np.linspace(-step_size, step_size, steps)
+            path = alphas[:, None] * d[None, :]
+        spectra = np.array([self.spectrum(k) for k in path])
+        drift = float(np.max(np.abs(spectra - spectra[0]))) if spectra.size else 0.0
+        return {"path": path, "spectra": spectra, "drift": drift, "nullity": float(Z.shape[1])}
+
+
+class _SpectralFlowBuilder:
+    def __init__(self, family: OperatorFamily, target_lam: np.ndarray):
+        self.family = family
+        self.target_lam = target_lam
+        self._method = "linear"
+        self._kw: dict[str, object] = {}
+
+    def via(self, method: str) -> '_SpectralFlowBuilder':
+        self._method = method
+        return self
+
+    def second_order(self) -> '_SpectralFlowBuilder':
+        if self._method == "linear":
+            self._method = "hessian"
+        return self
+
+    def trust(self) -> '_SpectralFlowBuilder':
+        self._method = "trust"
+        return self
+
+    def options(self, **kw) -> '_SpectralFlowBuilder':
+        self._kw.update(kw)
+        return self
+
+    def solve(self, **kw) -> InverseResult:
+        opts = {**self._kw, **kw}
+        return self.family.inverse(self.target_lam, method=self._method, **opts)
 
 
 # ────────────────────────────────────────────────────

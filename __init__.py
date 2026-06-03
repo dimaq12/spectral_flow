@@ -73,10 +73,10 @@ sft — Spectral Flow Transform v0.1.3
     gop = sft.graphop.GraphOperator(edges)
     if gop.is_bridge(0, 1): print("Critical edge!")
 """
-__version__ = "0.1.3"
+__version__ = "0.3.0"
 
 from .core import OperatorFamily, InverseResult, nullspace, graph_response_kernel
-from . import algebra, topology, hessian, families
+from . import algebra, topology, hessian, families, physics
 from . import tasks, constructor, homotopy, graphop
 from . import compress, streaming, order, embed
 from . import cluster, carleman, transport, verify
@@ -91,8 +91,8 @@ from .graphop import GraphOperator
 from .embed import GraphEmbedder, LogicalGraphEmbedder
 from .order import UniversalRankOperator, DefectPrecomputedCDF, rank_defect_analysis, carleman_cdf
 from .streaming import StreamingCDF, StreamingOrderOnline
-from .tasks import OperatorGenus, classify_task, cdf_rank_sort, dct_matrix, filter_via_dct, route_and_solve
-from .constructor import from_task, plan_operator, construct, synthesize
+from .tasks import OperatorGenus, classify_task, cdf_rank_sort, dct_matrix, filter_via_dct, route_and_solve, task, pipe
+from .constructor import OperatorBlueprint, from_task, plan_operator, construct, synthesize
 from .codec import InstantSpectralCodec
 from .invariants import all_invariants
 
@@ -140,7 +140,7 @@ def cluster_data(data, **kw): return tasks.cluster_via_laplacian(data, **kw)
 
 __all__ = [
     "OperatorFamily", "InverseResult", "nullspace", "graph_response_kernel",
-    "algebra", "topology", "hessian", "families",
+    "algebra", "topology", "hessian", "families", "physics",
     "tasks", "constructor", "homotopy", "graphop",
     "compress", "streaming", "order", "embed",
     "cluster", "carleman", "transport", "verify",
@@ -152,8 +152,8 @@ __all__ = [
     "UniversalRankOperator", "DefectPrecomputedCDF", "rank_defect_analysis",
     "carleman_cdf", "StreamingCDF", "StreamingOrderOnline",
     "OperatorGenus", "classify_task", "cdf_rank_sort",
-    "dct_matrix", "filter_via_dct", "route_and_solve",
-    "from_task", "plan_operator", "construct", "synthesize",
+    "dct_matrix", "filter_via_dct", "route_and_solve", "task", "pipe",
+    "OperatorBlueprint", "from_task", "plan_operator", "construct", "synthesize",
     "InstantSpectralCodec", "all_invariants",
     "audio", "image", "graph", "text", "timeseries",
     "video", "voxel", "pointcloud", "molecular",
