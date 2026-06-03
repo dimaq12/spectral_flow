@@ -462,6 +462,21 @@ Run them from the repository root:
 for f in sft/examples/demo_*.py; do python3 "$f"; done
 ```
 
+### Breakthrough Benchmarks
+
+These reports compare SFT against strong sparse baselines, not dense toy loops:
+`eigsh`, warm-start `lobpcg`, and `scipy.optimize.least_squares` with sparse
+eigenvalue residuals. Large baseline totals are marked as extrapolated when only
+a measured sample is run.
+
+| Benchmark | Baseline | SFT path | Result | Report |
+|-----------|----------|----------|--------|--------|
+| Sparse PDE query batch | warm-start `lobpcg` | one reference + `predict_many` | 316.6x total speedup, max error 2.39e-10 | [`md`](examples/reports/breakthrough_pde_queries.md) |
+| Inverse graph design | `least_squares` + sparse `eigsh` | SFT trust inverse | 30.6x time speedup, 28.5x fewer eigensolves | [`md`](examples/reports/breakthrough_graph_inverse.md) |
+| 2D PDE spectral control | repeated sparse `eigsh` | SFT batch + trust inverse | 111.4x total speedup, max error 9.60e-06 | [`md`](examples/reports/breakthrough_pde2d_control.md) |
+
+Summary: [`computational_breakthrough_summary.md`](examples/reports/computational_breakthrough_summary.md).
+
 | Demo | What it shows | Key result | Full report |
 |------|--------------|------------|-------------|
 | **Scale benchmark** | N=50..500, predict_many, sparse/physics partial spectrum | N=500 predict in 85us; predict×1000 in 12.7ms; sparse K=16 in 170ms | [`md`](examples/reports/benchmark_scale.md) |

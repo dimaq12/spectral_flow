@@ -1,3 +1,22 @@
+# Unreleased: Computational Breakthrough Benchmarks
+
+This work does not publish a new version by itself.  It adds reproducible
+benchmark evidence for the existing SFT 0.3 computational model.
+
+## Benchmark Methodology
+
+- Added `sft.benchmarks` with reusable timing, memory, eigensolve-count, error,
+  speedup, and machine-metadata helpers.
+- Added sparse PDE query benchmarks against `eigsh` and warm-start `lobpcg`.
+- Added inverse graph design benchmark against `scipy.optimize.least_squares`
+  with sparse eigensolver residuals.
+- Added 2D PDE query/control benchmark against repeated sparse eigensolves.
+- Added generated reports and a combined computational breakthrough summary.
+- Added smoke tests for benchmark harness, industrial baselines, and report
+  generation.
+
+---
+
 # SFT 0.3 Notes
 
 SFT 0.3 adds the Spectral Geometry Lab: non-Hermitian spectral geometry,

@@ -76,7 +76,7 @@ sft — Spectral Flow Transform v0.1.3
 __version__ = "0.3.0"
 
 from .core import OperatorFamily, InverseResult, nullspace, graph_response_kernel
-from . import algebra, topology, hessian, families, physics
+from . import algebra, topology, hessian, families, physics, benchmarks
 from . import tasks, constructor, homotopy, graphop
 from . import compress, streaming, order, embed
 from . import cluster, carleman, transport, verify
@@ -140,7 +140,7 @@ def cluster_data(data, **kw): return tasks.cluster_via_laplacian(data, **kw)
 
 __all__ = [
     "OperatorFamily", "InverseResult", "nullspace", "graph_response_kernel",
-    "algebra", "topology", "hessian", "families", "physics",
+    "algebra", "topology", "hessian", "families", "physics", "benchmarks",
     "tasks", "constructor", "homotopy", "graphop",
     "compress", "streaming", "order", "embed",
     "cluster", "carleman", "transport", "verify",

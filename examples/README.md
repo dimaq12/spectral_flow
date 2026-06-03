@@ -17,6 +17,9 @@ Each script writes a markdown report into `sft/examples/reports/`.
 | Demo | Why run it |
 |------|------------|
 | `demo_benchmark.py` | Core speed: build, `predict_many`, exact/partial eigensolve, inverse diagnostics, topology |
+| `demo_breakthrough_pde.py` | Sparse PDE query batch vs `eigsh` and warm-start `lobpcg` |
+| `demo_breakthrough_graph_inverse.py` | Inverse graph design vs `least_squares` + sparse `eigsh` |
+| `demo_breakthrough_pde2d_control.py` | 2D PDE query/control workload vs sparse eigensolver baselines |
 | `demo_adapters_load.py` | All 12 adapters from raw data to `OperatorFamily` |
 | `demo_topology.py` | Berry holonomy and eigenvector sign flip |
 | `demo_quantum_ep.py` | Non-Hermitian exceptional point and half-winding |
