@@ -1,5 +1,5 @@
 """
-sft — Spectral Flow Transform v0.1.0
+sft — Spectral Flow Transform v0.1.3
 
 ╔══════════════════════════════════════════════════════════════════════╗
 ║  MODULE DEPENDENCY GRAPH                                            ║
@@ -73,7 +73,7 @@ sft — Spectral Flow Transform v0.1.0
     gop = sft.graphop.GraphOperator(edges)
     if gop.is_bridge(0, 1): print("Critical edge!")
 """
-__version__ = "0.1.2"
+__version__ = "0.1.3"
 
 from .core import OperatorFamily, InverseResult, nullspace, graph_response_kernel
 from . import algebra, topology, hessian, families
